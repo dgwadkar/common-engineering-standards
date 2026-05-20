@@ -541,6 +541,8 @@ Graduation to a separate repo (per ADR-0004) is a `git filter-repo` away if any 
 
 ## 11. Phase 8 — Consumer-Side Sync Tool
 
+> **Status (as of 2026-05-20): COMPLETED.** All six tasks landed, all three acceptance criteria satisfied locally, 63 Node tests passing. Single-session execution (~3 hours of agent time vs the 6-day plan estimate). See `docs/execution-log/phase-8-log.md` for the full session record.
+
 **Goal**: Ship `@org/standards-sync` — a Node CLI that consumer repos run to pull the right stack's distribution outputs into their working tree.
 
 **Duration**: 6 days. **Output**: A published npm package.
@@ -563,9 +565,13 @@ Graduation to a separate repo (per ADR-0004) is a `git filter-repo` away if any 
 
 ### Acceptance Criteria
 
-- [ ] Running `npx @org/standards-sync` in a fresh Spring Boot 3.2 fixture project produces the file layout in Architecture Upgrade Report §5.3.
-- [ ] Running it twice consecutively produces zero `git diff`.
-- [ ] Running in a non-supported stack (e.g., a Ruby on Rails project) emits a clear "no applicable stack found" message and exits 0 (not an error).
+- [x] Running `npx @org/standards-sync` in a fresh Spring Boot 3.2 fixture project produces the file layout in Architecture Upgrade Report §5.3. — **Satisfied by `packages/standards-sync/test/end-to-end.test.js::AC1: spring-boot-3-2 fixture produces the §5.3 file layout (excluding opt-in scaffolds)`**. The test runs `sync()` against `fixtures/spring-boot-3-2/pom.xml` with `--local-dist dist/`, then asserts that every file in Architecture Report §5.3 is present at its canonical location (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.junie/AGENTS.md`, `.cursor/rules/*.mdc`, `src/test/java/com/_org/standards/`) and that no `memory-bank/` files exist unless `--with-memory-bank` is passed (separate AC1-opt-in test).
+- [x] Running it twice consecutively produces zero `git diff`. — **Satisfied by `packages/standards-sync/test/end-to-end.test.js::AC2: two consecutive sync runs leave every file byte-for-byte identical`**. The test snapshots SHA-256 of every emitted file (including `.standards-sync-manifest.json`) after the first run, runs `sync()` again with identical inputs, and asserts every checksum is unchanged. The implementation achieves this by (a) classifying placements as `identical` when planned content equals on-disk content, and (b) short-circuiting `writeManifest` when the manifest is already current (no-op runs do not even rewrite `syncedAt`). A second AC2-sibling test confirms that swapping in a different fixture's manifest WITHOUT a version bump still produces a no-op so long as the resolved stack and dist content are identical.
+- [x] Running in a non-supported stack (e.g., a Ruby on Rails project) emits a clear "no applicable stack found" message and exits 0 (not an error). — **Satisfied by `packages/standards-sync/test/end-to-end.test.js::AC3: a Rails-only project (Gemfile) returns NoApplicableStack with exit 0`** AND the CLI integration test `end-to-end: Rails project (no recognised manifest) exits 0 with no-applicable-stack rationale`. The detector returns `{stackId: null, rationale: ...}` when no manifest matches; the orchestrator surfaces that as `outcome.kind === "no-applicable-stack"`; the CLI maps that to exit code 0 and prints the rationale to stdout (no stack trace, no stderr noise).
+
+### Status Note
+
+**Phase 8 is complete (2026-05-20).** All six tasks landed; the package `@org/standards-sync@0.1.0` lives under `packages/standards-sync/` and is functionally ready to publish (npm publish gated on the eventual Phase 9 pilot feedback). The Phase-7 lesson §7-b recommendation (single source of truth for the stack catalog) was incorporated as a prerequisite — `schemas/stacks.json` is now read by both the Python compiler (`compiler/core/stack_filter.py`, `tools/generate_dist_readme.py`) and the Node CLI (`packages/standards-sync/stacks.json` is a bundled byte-for-byte copy refreshed via `npm run sync-stacks-catalog`). 63 Node tests + 279 Python tests all pass. The Maven / Gradle integration (task 6, marked "optional" in the original plan) ships as copy-pastable recipes under `packages/standards-sync/plugins/` rather than a native JVM build plugin — see `packages/standards-sync/plugins/README.md` for the rationale (single supply chain, no duplicated detection logic).
 
 ---
 

@@ -1,0 +1,175 @@
+// @org/standards-sync — idempotency + manual-edit detection (Plan §11 task 4).
+//
+// Strategy:
+//
+//   * Every sync writes a manifest at `<consumer>/.standards-sync-manifest.json` describing
+//     the version that produced each shipped file plus its SHA-256 checksum.
+//   * On re-sync, every target path that ALSO appears in the manifest is checksummed; if
+//     the on-disk file differs from the manifest's record, the file was edited locally.
+//   * Locally-edited files block the sync (`refuse-to-overwrite-without-force` per Phase-7
+//     `dist-protection-lint` lesson) UNLESS `--force` is passed.
+//
+// When the planned new content matches the on-disk content byte-for-byte (the
+// "re-sync-same-version" case), the write is a no-op for git — this satisfies the AC2
+// zero-diff contract automatically.
+//
+// The manifest is itself listed in `.gitignore` if the consumer wants to (we don't
+// generate `.gitignore` entries — that's an opinionated choice we leave to the consumer).
+
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
+
+export const MANIFEST_FILENAME = ".standards-sync-manifest.json";
+
+export class ManualEditConflictError extends Error {
+  constructor(conflicts) {
+    super(
+      `Refusing to overwrite ${conflicts.length} manually-edited file${conflicts.length === 1 ? "" : "s"}. ` +
+        `Re-run with --force to overwrite, or revert the edits first.`,
+    );
+    this.name = "ManualEditConflictError";
+    this.conflicts = conflicts;
+  }
+}
+
+function sha256OfBuffer(buf) {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+export function sha256OfFile(absPath) {
+  return sha256OfBuffer(readFileSync(absPath));
+}
+
+export function readManifest(projectDir) {
+  const file = path.join(projectDir, MANIFEST_FILENAME);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// Returns:
+//   {
+//     conflicts: [{targetRel, expectedSha, actualSha, lastSyncedVersion}],
+//     identical: [{targetRel}],         // planned content equals on-disk content
+//     wouldChange: [{targetRel}],       // file exists but planned content differs; pristine per manifest
+//     wouldAdd: [{targetRel}],          // file does not exist yet
+//   }
+//
+// `conflicts` is non-empty ONLY when the on-disk file differs from BOTH the manifest's
+// recorded checksum AND from the planned new content. A file that was manually edited but
+// then-set-aside (planned content happens to match) is silently accepted.
+export function classifyPlacements(placements, { projectDir, manifest, plannedShas } = {}) {
+  const conflicts = [];
+  const identical = [];
+  const wouldChange = [];
+  const wouldAdd = [];
+  const manifestFiles = manifest?.files || {};
+  for (const p of placements) {
+    const planned = plannedShas[p.targetRel];
+    if (!existsSync(p.targetAbs)) {
+      wouldAdd.push({ targetRel: p.targetRel });
+      continue;
+    }
+    const onDiskSha = sha256OfFile(p.targetAbs);
+    if (onDiskSha === planned) {
+      identical.push({ targetRel: p.targetRel });
+      continue;
+    }
+    const record = manifestFiles[p.targetRel];
+    if (!record) {
+      // File exists but the manifest doesn't track it — treat as a manual edit/foreign file.
+      conflicts.push({
+        targetRel: p.targetRel,
+        expectedSha: null,
+        actualSha: onDiskSha,
+        lastSyncedVersion: null,
+        reason: "file exists on disk but is not tracked by the manifest",
+      });
+      continue;
+    }
+    if (record.sha256 !== onDiskSha) {
+      conflicts.push({
+        targetRel: p.targetRel,
+        expectedSha: record.sha256,
+        actualSha: onDiskSha,
+        lastSyncedVersion: record.lastSyncedVersion,
+        reason: "checksum differs from the last-synced content (manually edited)",
+      });
+      continue;
+    }
+    // The on-disk file matches the manifest (pristine) but differs from the planned new
+    // bytes — a regular update.
+    wouldChange.push({ targetRel: p.targetRel });
+  }
+  return { conflicts, identical, wouldChange, wouldAdd };
+}
+
+// Helper: compute SHA-256 for every planned source file. Returns a {targetRel: sha} map.
+export function planShas(placements) {
+  const out = {};
+  for (const p of placements) {
+    out[p.targetRel] = sha256OfBuffer(readFileSync(p.sourceAbs));
+  }
+  return out;
+}
+
+export async function writeManifest({ projectDir, version, stackId, placements, plannedShas }) {
+  const files = {};
+  for (const p of placements) {
+    files[p.targetRel] = {
+      sha256: plannedShas[p.targetRel],
+      sourceRel: p.sourceRel,
+      ruleId: p.ruleId,
+      lastSyncedVersion: version,
+    };
+  }
+  const manifest = {
+    schemaVersion: 1,
+    stackId,
+    syncedVersion: version,
+    syncedAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    note:
+      "Auto-generated by @org/standards-sync. Tracks the SHA-256 of every file the sync " +
+      "wrote so future runs can detect manual edits. Safe to commit or .gitignore.",
+    files,
+  };
+  // Pretty-print with stable key order so the manifest itself produces zero diff across
+  // identical runs.
+  const stableManifest = {
+    schemaVersion: manifest.schemaVersion,
+    stackId: manifest.stackId,
+    syncedVersion: manifest.syncedVersion,
+    syncedAt: manifest.syncedAt,
+    note: manifest.note,
+    files: Object.fromEntries(
+      Object.keys(manifest.files)
+        .sort()
+        .map((k) => [k, manifest.files[k]]),
+    ),
+  };
+  const json = JSON.stringify(stableManifest, null, 2) + "\n";
+  await writeFile(path.join(projectDir, MANIFEST_FILENAME), json, "utf8");
+  return stableManifest;
+}
+
+// For tests that need a deterministic syncedAt — overrides Date.now() impact.
+export async function writeManifestWithFixedTimestamp(args, isoTimestamp) {
+  // eslint-disable-next-line no-undef
+  const realDate = Date;
+  const fixed = isoTimestamp;
+  // Light monkey-patch: replace toISOString temporarily.
+  const proto = realDate.prototype.toISOString;
+  realDate.prototype.toISOString = function () {
+    return fixed;
+  };
+  try {
+    return await writeManifest(args);
+  } finally {
+    realDate.prototype.toISOString = proto;
+  }
+}

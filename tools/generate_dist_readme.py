@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import pathlib
 import sys
 from typing import Dict, List, Optional, Sequence
@@ -59,33 +60,33 @@ from typing import Dict, List, Optional, Sequence
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = REPO_ROOT / "dist" / "README.md"
 DEFAULT_DIST_ROOT = REPO_ROOT / "dist"
+STACKS_CATALOG_PATH = REPO_ROOT / "schemas" / "stacks.json"
 
-# Tracked stack ids and their human descriptions. Kept in sync with
-# compiler/core/stack_filter.py::STACKS — that module is the source of truth at runtime,
-# but inlining a small static catalog here avoids the cross-import for a generator that
-# the release workflow runs in a barebones environment.
-KNOWN_STACKS: List[Dict[str, str]] = [
-    {
-        "id": "java-spring-boot-3",
-        "human_name": "Spring Boot 3",
-        "description": "Modern Spring Boot 3.x microservices using Spring Data JPA, Validation, and Lombok.",
-    },
-    {
-        "id": "java-spring-boot-2",
-        "human_name": "Spring Boot 2.7 (legacy)",
-        "description": "Legacy Spring Boot 2.7.x services mid-migration to 3.x — narrower rule set.",
-    },
-    {
-        "id": "typescript-nestjs-10",
-        "human_name": "NestJS 10",
-        "description": "TypeScript microservices on NestJS 10.x.",
-    },
-    {
-        "id": "python-fastapi-0-110",
-        "human_name": "FastAPI 0.110",
-        "description": "Python microservices on FastAPI 0.110.x.",
-    },
-]
+
+def _load_known_stacks() -> List[Dict[str, str]]:
+    """Loads the stack catalog from `schemas/stacks.json` (Phase-8 single source of truth).
+
+    Phase-7 lesson §7-b: this previously duplicated the `compiler.core.stack_filter.STACKS`
+    catalog as a sibling dict, kept in lock-step by a defense-in-depth test. Phase 8
+    consolidated both into `schemas/stacks.json`; this helper extracts just the fields the
+    README generator needs (`id`, `human_name`, `description`). The release workflow runs in
+    a barebones environment (no `pip install -e compiler/`) so this generator still avoids
+    the cross-import — but the underlying data is now identical to what the compiler reads.
+    """
+    with open(STACKS_CATALOG_PATH, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    descriptors = catalog["properties"]["stacks"]["const"]
+    return [
+        {
+            "id": desc["id"],
+            "human_name": desc["human_name"],
+            "description": desc["description"],
+        }
+        for desc in descriptors
+    ]
+
+
+KNOWN_STACKS: List[Dict[str, str]] = _load_known_stacks()
 
 # Target-id → display label used when listing what's present in a stack's directory.
 TARGET_LABELS = {

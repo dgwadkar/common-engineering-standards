@@ -1,0 +1,30 @@
+<!--
+  Drop this <plugin> block into your project's pom.xml under <build><plugins>.
+  Source: @org/standards-sync (Plan §11 task 6).
+  Pin the standards version via a .standards-version file at the project root, or
+  hard-code it here by adding <argument>--version</argument><argument>v0.1.0</argument>.
+-->
+<plugin>
+    <groupId>org.codehaus.mojo</groupId>
+    <artifactId>exec-maven-plugin</artifactId>
+    <version>3.5.0</version>
+    <executions>
+        <execution>
+            <id>sync-engineering-standards</id>
+            <phase>generate-resources</phase>
+            <goals><goal>exec</goal></goals>
+            <configuration>
+                <executable>npx</executable>
+                <arguments>
+                    <argument>--yes</argument>
+                    <argument>@org/standards-sync@0.1.0</argument>
+                    <argument>--project-dir</argument>
+                    <argument>${project.basedir}</argument>
+                </arguments>
+                <successCodes>
+                    <successCode>0</successCode>
+                </successCodes>
+            </configuration>
+        </execution>
+    </executions>
+</plugin>

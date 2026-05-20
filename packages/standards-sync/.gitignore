@@ -1,0 +1,4 @@
+node_modules/
+# Test scratch space (workspace-rooted in tests/.tmp/node-sync; this entry covers the
+# accidental in-package variant that early dev runs created).
+tests/

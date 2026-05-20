@@ -7,7 +7,7 @@ that has already produced three foundational documents in `docs/`:
   - `02-implementation-plan.md`             — the eleven-phase execution plan (Phase 0 → Phase 10)
   - `03-execution-playbook.md`              — the playbook you are operating under right now
 
-Your task this session: **execute Phase 8 — Consumer-Side Sync Tool** end-to-end.
+Your task this session: **execute Phase 9 — Pilot Adoption and Telemetry** end-to-end.
 
 You have NO memory of any prior session. Treat the implementation plan and any logs in
 `docs/execution-log/` as your only source of context.
@@ -17,28 +17,22 @@ PROCEDURE (follow in order)
 ────────────────────────────────────────────────────────────────────
 
 Step 1. ORIENT
-  - Read `docs/02-implementation-plan.md`. Find the section for Phase 8 (§11).
-  - Read every prior log under `docs/execution-log/phase-*-log.md`. Pay attention to the
-    "Decisions made" and "Lessons that affect later phases" sections of each. The Phase-7
-    log's "Lessons that affect later phases" section contains four specific Phase-8 lessons:
-      (a) the dry-run-first pattern (every Phase-7 tool supports `--dry-run`),
-      (b) the recommendation to introduce `schemas/stacks.json` as the single source of
-          truth shared between the Python compiler and the Node sync CLI,
-      (c) the diff-detection pattern from `dist-protection-lint` is the right model for
-          consumer-side "manual edits detected" checks,
-      (d) the existence of a working `make release-dry-run` Makefile target that produces
-          a complete `dist/` tree locally — Phase 8 can test its sync CLI against this
-          without ever needing a real GitHub release.
+  - Read `docs/02-implementation-plan.md`. Find the section for Phase 9 (§12).
+  - Read every prior log under `docs/execution-log/phase-*-log.md`. Pay close attention to the
+    Phase-8 log's §7 "Lessons that affect later phases" — three of those lessons (L1, L2, L3)
+    speak directly to Phase 9 telemetry and pilot kick-off mechanics.
   - Read any other documents referenced by the phase's task list:
-      - `docs/decision-records/0004-single-repo-distribution.md` (the dist-tree layout
-        Phase 8 consumes).
-      - `docs/01-architecture-upgrade-report.md` §5.3 (the consumer-side file layout
-        Phase 8 must produce).
-      - `docs/release-bot-setup.md` and `docs/release-rollback.md` (the operator-side
-        Phase-7 docs Phase 8's CLI may need to cross-reference in error messages).
+      - `packages/standards-sync/README.md` (the consumer CLI's user-facing contract — pilots
+        will run this CLI as their primary touchpoint).
+      - `packages/standards-sync/plugins/README.md` (the Maven/Gradle integration recipes —
+        relevant for the two JVM pilots).
+      - `docs/release-bot-setup.md` and `docs/release-rollback.md` (operator runbooks — pilot
+        kick-off may surface a need to cut a fresh release tag).
+      - `docs/01-architecture-upgrade-report.md` §5 (the consumer-side experience pilots
+        are validating).
 
 Step 2. PLAN
-  - Use the TodoWrite tool to enumerate every task and every acceptance criterion in Phase 8
+  - Use the TodoWrite tool to enumerate every task and every acceptance criterion in Phase 9
     as separate todos. Mark the first one in_progress.
   - If the phase depends on artifacts from earlier phases, verify those artifacts exist on
     disk. If any are missing, STOP and report the gap — do not invent missing prerequisites.
@@ -50,7 +44,7 @@ Step 3. EXECUTE
   - Update the TodoWrite list in real time as tasks move from in_progress → completed.
 
 Step 4. VERIFY
-  - Walk through every acceptance criterion in the implementation plan for Phase 8.
+  - Walk through every acceptance criterion in the implementation plan for Phase 9.
   - For each, perform an objective verification (file exists, command succeeds, output
     matches expected).
   - If a criterion cannot be met, document the blocker explicitly — do not silently skip it.
@@ -63,14 +57,14 @@ Step 5. PRODUCE THE FOUR DELIVERABLES (per `03-execution-playbook.md` §3)
   Deliverable B — Update `docs/02-implementation-plan.md`
     - Mark this phase's status (status comment beside the phase header):
         > **Status (as of <YYYY-MM-DD>): COMPLETED** OR
-        > **Status (as of <YYYY-MM-DD>): IN-PROGRESS — see phase-8-log.md for blockers**
+        > **Status (as of <YYYY-MM-DD>): IN-PROGRESS — see phase-9-log.md for blockers**
     - Tick every acceptance-criteria checkbox `[ ]` → `[x]` for met criteria.
       For unmet criteria, change to `[!]` and append a one-line reason after the criterion text.
     - If you discovered something that changes subsequent phases, add a callout block:
-        > ⚠️ Revision (Phase 8 session, <date>): <description of the change>
+        > ⚠️ Revision (Phase 9 session, <date>): <description of the change>
     - Update §16 Indicative Timeline if actual elapsed time deviated noticeably from the estimate.
 
-  Deliverable C — Write `docs/execution-log/phase-8-log.md`
+  Deliverable C — Write `docs/execution-log/phase-9-log.md`
     - Use the template in `03-execution-playbook.md` §5.
     - Be specific. List exact file paths created/modified. Quote exact command output for
       verifications.
@@ -78,11 +72,11 @@ Step 5. PRODUCE THE FOUR DELIVERABLES (per `03-execution-playbook.md` §3)
     - Capture every blocker, even if you worked around it.
 
   Deliverable D — Print + Save the Next-Session Prompt
-    - If Phase 8 is fully complete, generate the prompt for Phase 9
+    - If Phase 9 is fully complete, generate the prompt for Phase 10
       using the Master Session Prompt template in `03-execution-playbook.md` §4 with the next
       phase number and title substituted.
-    - If Phase 8 is incomplete, generate a Resumption Prompt instead, instructing the
-      next session to continue Phase 8 with explicit pointers to the unfinished tasks.
+    - If Phase 9 is incomplete, generate a Resumption Prompt instead, instructing the
+      next session to continue Phase 9 with explicit pointers to the unfinished tasks.
     - Write the prompt to `docs/execution-log/next-session-prompt.md` (overwrite any prior
       content).
     - ALSO print it as a fenced code block in the chat as the very last thing in your final
@@ -94,7 +88,7 @@ HARD RULES
 ────────────────────────────────────────────────────────────────────
 
   - DO NOT skip an acceptance criterion silently. If you cannot meet it, mark `[!]` and explain.
-  - DO NOT execute work outside the scope of Phase 8. Stay in scope.
+  - DO NOT execute work outside the scope of Phase 9. Stay in scope.
   - DO NOT invent file paths or command names. If a path is unclear, read the implementation
     plan again.
   - DO NOT modify any phase's plan retroactively without using a `> ⚠️ Revision` callout.
@@ -106,106 +100,130 @@ HARD RULES
     Standards Council reviews commits in PRs, not autonomously.
   - DO NOT regenerate or hand-edit anything under `dist/` except `dist/README.md` during the
     Phase-1 scaffolding. The release workflow regenerates `dist/` under the `@standards-bot`
-    identity (per Phase 7 deliverables). Phase 8's CLI READS the dist tree (or a tarball of
-    it from a GitHub Release); it never WRITES to it.
+    identity (per Phase 7 deliverables). Phase 9 only READS the dist tree (via the Phase-8
+    consumer sync CLI); it never WRITES to it.
+  - DO NOT publish `@org/standards-sync` to npm without explicit operator approval — that
+    requires npm-org credentials (see Phase-8 log §9 open question on publish gating).
 
 ────────────────────────────────────────────────────────────────────
-PHASE-8 CONTEXT (from prior sessions)
+PHASE-9 CONTEXT (from prior sessions)
 ────────────────────────────────────────────────────────────────────
 
-Phase 7 completed on 2026-05-20. The full state of the repository:
+Phase 8 completed on 2026-05-20. The full state of the repository:
 
   - 18 source rules + 3 `_meta.yml` stack descriptors under `source/`.
   - 6 transformer modules under `compiler/transformers/` + 5 core modules under
-    `compiler/core/` + the `python -m compiler` CLI driver. The CLI accepts
-    `--target {cursor,github_copilot,claude_skills,junie,agents_md,memory_bank,all}`
-    and `--stack <stack-id>` OR `--all-stacks` (Phase-7-added; the release workflow uses
-    this to regenerate every stack subtree in one invocation). Output is byte-deterministic
-    across runs AND byte-identical between `--all-stacks` and a per-stack loop (locked by
-    `tests/test_phase7_end_to_end.py`).
-  - 4 fixture consumer manifests under `fixtures/{spring-boot-3-2,spring-boot-2-7-legacy,
-    nestjs-10,fastapi-0-110}/` + 4 byte-for-byte golden trees under
-    `tests/golden/<fixture>/stacks/<stack-id>/` (77 golden files total).
-  - 4 hand-authored ArchUnit Java fixtures under `tests/archunit/` + a manual `mvn test`
-    verification README documenting AC1 carry-forward.
-  - `Makefile` with `make update-golden`, `make explain-golden-diff` (Phase 6) plus
-    `make release-dry-run` (Phase 7 — computes next version + renders CHANGELOG + README
-    previews + builds a complete dist tree into tmpdir).
-  - 269 passing + 7 skipped pytest tests (the 7 are sandbox-conditional integration tests
-    for `compute_semver_bump.py` that run unconditionally in CI).
-  - `.github/workflows/validate.yml` has 5 jobs: `tree-shape`, `schema-validation`,
-    `compiler-unit-tests`, `golden-snapshots`, `dist-protection-lint` (the last added in
-    Phase 7).
-  - `.github/workflows/release.yml` is the Phase-7 manual `workflow_dispatch` workflow that
-    is the SOLE producer of `dist/` changes. It is wired but cannot run until the operator
-    completes the App-registration handoff steps in `docs/release-bot-setup.md`.
-  - Three Phase-7 release-helper tools under `tools/`:
-    `compute_semver_bump.py`, `generate_changelog.py`, `generate_dist_readme.py`.
-  - Three Phase-7 docs: `docs/release-bot-setup.md`, `docs/release-rollback.md`, plus
-    reconciliation updates to `docs/branch-protection-config.md`.
+    `compiler/core/` + the `python -m compiler` CLI driver with `--target {cursor,
+    github_copilot,claude_skills,junie,agents_md,memory_bank,all}` and
+    `--stack <stack-id>` OR `--all-stacks`. Output is byte-deterministic and
+    byte-identical between `--all-stacks` and a per-stack loop.
+  - The canonical stack catalog lives in `schemas/stacks.json` (Phase 8 lift).
+    Both `compiler/core/stack_filter.py` and `tools/generate_dist_readme.py` load
+    it at import time; the Node sync CLI consumes a byte-for-byte bundled copy
+    at `packages/standards-sync/stacks.json`. Adding a fifth stack is a one-entry
+    append to `schemas/stacks.json` plus a fixture under `fixtures/` plus a golden
+    tree under `tests/golden/`.
+  - 4 fixture consumer manifests under `fixtures/{spring-boot-3-2,
+    spring-boot-2-7-legacy,nestjs-10,fastapi-0-110}/` + 4 byte-for-byte golden
+    trees under `tests/golden/<fixture>/stacks/<stack-id>/` (77 golden files).
+  - 4 hand-authored ArchUnit Java fixtures under `tests/archunit/`.
+  - `Makefile` with `make update-golden`, `make explain-golden-diff`,
+    `make release-dry-run`.
+  - **279 passing + 7 skipped pytest tests** (the 7 are sandbox-conditional;
+    they run unconditionally in CI).
+  - **63 passing Node tests** (`cd packages/standards-sync && npm test`).
+  - `.github/workflows/validate.yml` has 5 jobs: `tree-shape`,
+    `schema-validation`, `compiler-unit-tests`, `golden-snapshots`,
+    `dist-protection-lint`.
+  - `.github/workflows/release.yml` is the Phase-7 manual `workflow_dispatch`
+    workflow that is the SOLE producer of `dist/` changes. The first release
+    (`v0.1.0`) has been published; subsequent releases are operator-dispatched
+    per the `docs/release-bot-setup.md` runbook.
+  - **Phase 8's deliverable: `@org/standards-sync@0.1.0` lives under
+    `packages/standards-sync/`** — a Node ≥18 CLI that consumer repos run to
+    sync the Engineering Standards distribution. Commands of note:
+      - `cd packages/standards-sync && npm test` — runs the 63-test suite.
+      - `node packages/standards-sync/bin/standards-sync.js --project-dir <path>
+         --local-dist dist --version v0.1.0` — local smoke test against any
+         consumer project.
+      - Drop-in JVM recipes in `packages/standards-sync/plugins/{maven,gradle}/`.
 
-Phase 8 is the "consumer-side sync" phase. Its six task pillars per
-`docs/02-implementation-plan.md` §11 are:
+Phase 9 is the "pilot adoption and telemetry" phase. Its six task pillars per
+`docs/02-implementation-plan.md` §12 are:
 
-  1. **Stack detection** — parse `pom.xml` / `build.gradle.kts` / `package.json` /
-     `pyproject.toml` to determine the stack id and pinned version. Emit a rationale
-     output line so users can debug surprises.
+  1. **Pilot selection** — three repos:
+       - One greenfield Spring Boot 3 microservice.
+       - One existing Spring Boot 2.7 monolith mid-migration to 3.x.
+       - One TypeScript/NestJS service.
+       Selection is operator-driven; the agent's deliverable is the selection
+       *criteria document* + the kick-off PR template each pilot lands.
 
-       The Phase-6 `tests/test_compiler_golden.py::_FIXTURE_TO_STACK` map is the reference
-       for the manifest-to-stack-id mapping. Consider the Phase-7 lesson §7-b: a single
-       source-of-truth catalog under `schemas/stacks.json` shared with the Python compiler
-       would eliminate the duplication that currently lives in
-       `tools/generate_dist_readme.py::KNOWN_STACKS` and
-       `compiler.core.stack_filter.STACKS`. Triage with the Standards Architect — the
-       Phase-7 log §9 explicitly raises this as a Phase-8 forward question.
+  2. **Embedded liaison** — a Pilot Liaison joins each pilot's standup for the
+     four-week window. The agent cannot perform the staffing; the deliverable
+     is the Pilot Liaison job description + the four-week schedule template.
 
-  2. **Version resolution** — read `.standards-version` if present (pinned mode) or query
-     the GitHub Releases API for the latest `v<X.Y.Z>` tag (floating mode). Fetch via the
-     GitHub tarball API scoped to the `dist/stacks/<stack>/` subtree at that tag.
+  3. **Telemetry collection** — opt-in, privacy-preserving:
+       - Sync invocations (count, version pinned, stack detected).
+       - Rule-set delta on every sync (rules added/removed in the consumer's
+         `.cursor/rules/`).
+       - Per-rule "applied" counts via Cursor's rule-application telemetry
+         (where available).
+     The Phase-8 log §7 L3 notes the obvious telemetry source: the sync
+     report's no-matching-globs warning section. The agent should add an
+     `--emit-telemetry <path-or-url>` flag to `@org/standards-sync` and a
+     telemetry-schema document that pilots' CI pipelines POST to.
 
-  3. **File placement** per plan §11 task 3 — copies each `dist/stacks/<stack>/<target>/`
-     subtree into the consumer's conventional location. The Memory Bank scaffold is opt-in
-     via `--with-memory-bank`. ArchUnit fixtures ship to
-     `src/test/java/com/_org/standards/archunit/` per the Phase-6 package convention.
+  4. **Adoption metrics dashboard** — pilot repos per `.standards-version`,
+     rule activations per repo per week, broken syncs + root causes. The
+     agent's deliverable is the dashboard *spec* + a starter implementation
+     using whatever observability stack the org has standardised on (or a
+     stand-alone Grafana/Datadog config the operator can drop in).
 
-  4. **Idempotency** — re-running with the same `.standards-version` produces zero `git diff`.
-     The "manual-edits detected" check should follow the pattern from Phase 7's
-     `dist-protection-lint` job (diff against the shipped checksum; refuse to overwrite
-     without `--force`).
+  5. **Feedback loop** — weekly retrospective with the three liaisons; every
+     issue files a GitHub issue with a `pilot-feedback` label. The agent's
+     deliverable is the retro-meeting template + the `pilot-feedback` issue
+     template under `.github/ISSUE_TEMPLATE/`.
 
-  5. **Sync report** — Markdown summary with: stack detected, rules copied, rules skipped
-     (with reasons), rules whose globs match no files in the consumer (warning).
+  6. **Outcome review at week 4** — Go/No-Go decision. The agent's deliverable
+     is the review *agenda template* + the decision-record format under
+     `docs/decision-records/0005-phase-9-pilot-outcome.md` (or similar).
 
-  6. **Optional Maven/Gradle plugin** — wraps the Node CLI for Java consumers. Phase 8 task 6.
+Acceptance criteria (verbatim from plan §12):
 
-Acceptance criteria (verbatim from plan §11):
+  - [ ] All three pilots are running on a tagged release of the distribution.
+  - [ ] Telemetry dashboard exists and shows non-trivial activation counts.
+  - [ ] The week-4 retro produces either a Go decision OR a documented blocker
+        list with owners.
 
-  - [ ] Running `npx @org/standards-sync` in a fresh Spring Boot 3.2 fixture project produces
-        the file layout in Architecture Upgrade Report §5.3.
-  - [ ] Running it twice consecutively produces zero `git diff`.
-  - [ ] Running in a non-supported stack (e.g., a Ruby on Rails project) emits a clear
-        "no applicable stack found" message and exits 0 (not an error).
+Several of these ACs depend on operator-side actions that the agent cannot
+perform — recruiting three pilot teams, staffing a Pilot Liaison, accumulating
+four weeks of real telemetry. The agent's contract is to land the *mechanical
+infrastructure* (telemetry flag in the CLI, telemetry schema, dashboard spec
++ starter config, retro/decision-record templates, pilot-onboarding PR
+template) so the pilot teams can run with minimal friction. Each AC that
+requires elapsed time should be marked `[!]` with a clear handoff note
+pointing at the runbook step that closes it.
 
-Several of these ACs can be fully verified by the agent (running the CLI against the Phase-6
-fixture projects under `fixtures/`). The fourth (publishing to a real npm registry) is an
-operator action; the agent's contract is to produce a buildable + locally-runnable Node
-CLI with `npx` semantics emulable via a local `npm link` or `npm pack`.
+Important Phase-9 boundary: the agent does NOT recruit pilot teams or
+publish `@org/standards-sync` to npm. Both are operator actions (and the
+publish action depends on npm-org credentials per Phase-8 log §9). The
+agent's Phase-9 deliverables make those operator actions one-step PRs
+or one-command runs.
 
-Important Phase-8 boundary: Phase 8's CLI runs in the CONSUMER repo, not the central repo.
-It is a Node package (per plan §11) that lives under `packages/standards-sync/` or
-similar inside `engineering-standards-central`. The agent must:
+The Phase-8 log §7 lessons (L1–L5) carry forward to Phase 9 as concrete
+nudges:
 
-  - Set up `package.json` with the `@org/standards-sync` name + a `bin` entry pointing
-    at the CLI's entrypoint (so `npx @org/standards-sync` works after publish).
-  - Use only Node stdlib + a small, well-trusted dependency set (e.g., `commander` or
-    `arg` for arg parsing, `tar` for archive extraction). Document dependency rationale
-    in the closing PR.
-  - Write Jest/Vitest tests against the Phase-6 fixture projects (`fixtures/spring-boot-3-2/`
-    etc.) — running the sync CLI against each fixture and asserting the produced file
-    layout matches Architecture Upgrade Report §5.3.
-
-Phase 8 does NOT need to publish to npm — that is a Phase-8-closing-PR operator action
-or Phase-9 pilot prerequisite. The agent's deliverable is the buildable package + a green
-test suite that proves the CLI works against the Phase-6 fixtures.
+  - L1 — Add `--write-report sync-report.md` + a `git status --porcelain` check
+        to every pilot's CI workflow on day one (converts AC2 into a permanent
+        drift guard).
+  - L2 — Default pilots to PINNED mode (`.standards-version` file) for week
+        one; floating mode is an explicit week-3 graduation step.
+  - L3 — Aggregate sync-report no-match warnings per consumer per week — this
+        is the cleanest signal for rule-glob refinement.
+  - L4 — Adding a fifth stack is a one-entry append to `schemas/stacks.json`
+        + fixture + golden tree (now in scope for Phase 10 governance, not
+        Phase 9).
+  - L5 — Maven/Gradle integration is **recipes, not native plugins** (the
+        Phase-10 governance doc encodes this; Phase 9 should not revisit).
 
 Begin Step 1 now.
