@@ -141,7 +141,7 @@ def _render(version: str, dist_root: pathlib.Path) -> str:
     out.append("")
     out.append(
         "Compiled artifacts are regenerated **only** by the release workflow under the "
-        "`@standards-bot` GitHub App identity. Human-authored edits to any file inside "
+        "`@engineering-standards-bot` GitHub App identity. Human-authored edits to any file inside "
         "this directory are rejected by the `dist-protection-lint` PR status check; see "
         "ADR-0004 for the four-guard protection model."
     )
@@ -221,7 +221,7 @@ def _render(version: str, dist_root: pathlib.Path) -> str:
     out.append("Audit the bot-authored release commits:")
     out.append("")
     out.append("```bash")
-    out.append("git log --author='standards-bot' --pretty='%h %ai %s' -- dist/")
+    out.append("git log --author='engineering-standards-bot' --pretty='%h %ai %s' -- dist/")
     out.append("```")
     out.append("")
     return "\n".join(out)

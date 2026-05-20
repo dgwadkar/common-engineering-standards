@@ -9,14 +9,14 @@
 #   docs/02-implementation-plan.md §2.3 review SLA.
 #
 # - /dist/ is the compiled output tree. PRs touching it auto-request review
-#   from the @standards-bot GitHub App identity. The App NEVER approves human
+#   from the @engineering-standards-bot GitHub App identity. The App NEVER approves human
 #   PRs — `dist/` is regenerated only by the release workflow (see Phase 7,
 #   docs/02-implementation-plan.md §10). Human-authored modifications to
 #   /dist/ are additionally rejected by the `dist-protection-lint` PR status
 #   check (Phase 7) and by the opt-in client-side pre-commit hook at
 #   tools/git-hooks/pre-commit (Phase 1).
 #
-# NOTE: The @platform-team, @standards-council, and @standards-bot handles
+# NOTE: The @platform-team, @standards-council, and @engineering-standards-bot handles
 # must exist as GitHub Teams / GitHub App identities in the org before this
 # file becomes load-bearing. Until then, CODEOWNERS still parses cleanly and
 # documents intent; GitHub will silently drop reviewers for handles that do
@@ -26,4 +26,4 @@
 *           @platform-team @standards-council
 
 # Compiled distribution — read-only to humans; routed to the bot identity.
-/dist/      @standards-bot
+/dist/      @engineering-standards-bot

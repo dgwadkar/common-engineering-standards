@@ -36,7 +36,7 @@ name: validate
 #
 # Phase 7 (docs/02-implementation-plan.md §10 task 3) adds the
 # `dist-protection-lint` job: on every PR, fail if any commit modifies
-# `dist/**` and is NOT authored by the `@standards-bot` GitHub App. The
+# `dist/**` and is NOT authored by the `@engineering-standards-bot` GitHub App. The
 # release workflow at `.github/workflows/release.yml` is the SOLE allowed
 # producer of `dist/` changes; this job is the PR-level enforcement that
 # pairs with branch protection's "Restrict who can push" setting on `main`
@@ -509,10 +509,15 @@ jobs:
         run: |
           set -euo pipefail
           base_ref="${{ github.event.pull_request.base.ref }}"
-          git fetch --no-tags --depth=0 origin "${base_ref}"
+          # NOTE: do NOT pass `--depth=0` here — git fetch rejects 0 as "not a
+          # positive number". Full history is already pulled by the checkout
+          # step above (`fetch-depth: 0`, which actions/checkout interprets as
+          # unbounded), so a plain `git fetch` just updates origin/<base_ref>
+          # to its tip without re-deepening anything.
+          git fetch --no-tags origin "${base_ref}"
           echo "BASE_SHA=$(git rev-parse origin/${base_ref})" >> "$GITHUB_ENV"
 
-      - name: Enforce ADR-0004 — dist/ is regenerated only by @standards-bot
+      - name: Enforce ADR-0004 — dist/ is regenerated only by @engineering-standards-bot
         run: |
           set -euo pipefail
 
@@ -525,33 +530,33 @@ jobs:
           fi
 
           echo "::warning title=dist/ paths detected in PR::The following dist/ paths"
-          echo "::warning::are modified by this PR. Verifying every commit author is @standards-bot."
+          echo "::warning::are modified by this PR. Verifying every commit author is @engineering-standards-bot."
           while IFS= read -r p; do
             echo "  - $p"
           done <<< "$dist_paths"
 
-          # 2. Every commit in the PR range MUST be authored by the @standards-bot App.
+          # 2. Every commit in the PR range MUST be authored by the @engineering-standards-bot App.
           #    The App identity surfaces in `git log` as:
-          #       Author name:  "standards-bot[bot]"
-          #       Author email: "<APP_ID>+standards-bot[bot]@users.noreply.github.com"
+          #       Author name:  "engineering-standards-bot[bot]"
+          #       Author email: "<APP_ID>+engineering-standards-bot[bot]@users.noreply.github.com"
           #    We match on the name, which is stable across rotations.
           #
           #    Allowed values (any one matches):
-          #       "standards-bot[bot]"  (the literal app identity)
-          #       "standards-bot"       (graceful fallback if the [bot] suffix is stripped)
+          #       "engineering-standards-bot[bot]"  (the literal app identity)
+          #       "engineering-standards-bot"       (graceful fallback if the [bot] suffix is stripped)
           non_bot_authors=$(git log "${BASE_SHA}..HEAD" --format='%an' \
-            | grep -vE '^standards-bot(\[bot\])?$' || true)
+            | grep -vE '^engineering-standards-bot(\[bot\])?$' || true)
 
           if [[ -n "$non_bot_authors" ]]; then
             echo ""
             echo "::error title=dist-protection-lint failure::Human authors cannot modify dist/."
             echo "::error::The dist/ tree is regenerated only by .github/workflows/release.yml"
-            echo "::error::running under the @standards-bot GitHub App identity."
+            echo "::error::running under the @engineering-standards-bot GitHub App identity."
             echo "::error::See docs/decision-records/0004-single-repo-distribution.md."
             echo ""
             echo "Commits in this PR authored by non-bot identities:"
             git log "${BASE_SHA}..HEAD" --format='  %h  %an  %s' \
-              | grep -vE '  standards-bot(\[bot\])?  ' || true
+              | grep -vE '  engineering-standards-bot(\[bot\])?  ' || true
             echo ""
             echo "Recovery options:"
             echo "  (a) Drop the dist/ changes from this PR (most common — these changes"
@@ -562,6 +567,6 @@ jobs:
             exit 1
           fi
 
-          echo "Every commit in this PR is authored by @standards-bot. Pass."
+          echo "Every commit in this PR is authored by @engineering-standards-bot. Pass."
           # The lint passes if the PR is the release workflow's own PR (rare —
           # release.yml pushes direct to main, so this branch normally never fires).

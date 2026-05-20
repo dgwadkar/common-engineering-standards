@@ -32,7 +32,7 @@ saved without breaking PRs; until then the setting is left **off** and marked TO
   - Phase 3 onwards: bump to **2** (one Standards Architect + one Compiler Engineer) per
     `docs/02-implementation-plan.md` §2.1 review SLA.
 - [x] **Dismiss stale pull-request approvals when new commits are pushed.**
-- [x] **Require review from Code Owners.** Routes `/dist/` PRs to `@standards-bot` per
+- [x] **Require review from Code Owners.** Routes `/dist/` PRs to `@engineering-standards-bot` per
       `.github/CODEOWNERS`.
 
 ### 2.2 Status checks
@@ -64,7 +64,7 @@ saved without breaking PRs; until then the setting is left **off** and marked TO
         events it is correctly skipped (not failed). When configuring required
         status checks, mark this one as required only on PR contexts — GitHub's
         required-status-check matching is by job name, so the conditional skip
-        does not block direct pushes to `main` from `@standards-bot`.
+        does not block direct pushes to `main` from `@engineering-standards-bot`.
 
 ### 2.3 Conversation and merge rules
 
@@ -77,18 +77,18 @@ saved without breaking PRs; until then the setting is left **off** and marked TO
 - [x] **Restrict who can push to matching branches.**
 - Allowed pushers (Phase 1 baseline): **empty** — i.e., nobody pushes directly; all changes flow
       through PRs.
-- [x] **(Phase 7)** Add the `@standards-bot` GitHub App as an allowed pusher so that
+- [x] **(Phase 7)** Add the `@engineering-standards-bot` GitHub App as an allowed pusher so that
       `release.yml` can push the regenerated `dist/` commit and the annotated tag.
       - The App is provisioned per `docs/release-bot-setup.md`. The operator action is:
         Settings → Branches → `main` → Edit → **Restrict who can push** →
-        add `standards-bot` (the App appears as a selectable actor once installed).
+        add `engineering-standards-bot` (the App appears as a selectable actor once installed).
       - **CRITICAL**: this setting must be applied BEFORE the first `release.yml` dispatch.
         Without it, the workflow fails at the push step with
         `refusing to update protected branch`. This is the gating operator action for
         Phase-7 AC2 (manual dispatch produces a single bot-authored commit + tag).
       - Verify the actor name renders correctly with the `verify_actors` API:
         `gh api /repos/{owner}/{repo}/branches/main/protection \
-         --jq '.restrictions.apps[].slug'` should return `standards-bot`.
+         --jq '.restrictions.apps[].slug'` should return `engineering-standards-bot`.
 
 ### 2.5 Force-push and deletion
 
@@ -97,7 +97,7 @@ saved without breaking PRs; until then the setting is left **off** and marked TO
 
 ### 2.6 Signed commits (optional but recommended)
 
-- [ ] **Require signed commits.** Enable once org policy mandates it; the `@standards-bot` App must
+- [ ] **Require signed commits.** Enable once org policy mandates it; the `@engineering-standards-bot` App must
       be configured to sign with a key the org's verification policy accepts.
 
 ---
@@ -143,14 +143,26 @@ documented checklist and the live settings is a governance bug.
   GitHub-API access in this session.
 - **Phase 7 (as of 2026-05-20)**: the document is now reconciled with the live CI job names —
   `golden-snapshots` replaces the placeholder `golden-tests`, and the new `dist-protection-lint`
-  job is listed as a required status check. The `@standards-bot` push permission entry is ticked
+  job is listed as a required status check. The `@engineering-standards-bot` push permission entry is ticked
   in §2.4 with operator-action notes. **Apply-in-UI + screenshot remain operator actions** for
   Phase-7 AC4. The `release.yml` workflow has hard runtime dependencies on:
     1. The `STANDARDS_BOT_APP_ID` and `STANDARDS_BOT_PRIVATE_KEY` repo secrets being set
        (per `docs/release-bot-setup.md`).
-    2. The §2.4 "Restrict who can push" setting allowing the `standards-bot` App.
+    2. The §2.4 "Restrict who can push" setting allowing the `engineering-standards-bot` App.
   Until both are in place, `release.yml` will fail at the push step. This is by design — the
   failure mode is a clear operator-action prompt rather than a silent half-release.
+- **Post-Phase-7 slug reconciliation (2026-05-20)**: The GitHub App was actually registered
+  under the slug `engineering-standards-bot` (the bare `standards-bot` was unavailable on
+  github.com). All references in this document and across the live workflow / test / doc
+  surface have been updated to match. The two repo-secret NAMES
+  (`STANDARDS_BOT_APP_ID`, `STANDARDS_BOT_PRIVATE_KEY`) are kept as-is — they are GitHub
+  Actions context keys, not user-visible identity, and were already provisioned at the
+  pre-reconciliation values. The first live release (`v0.1.0`, commit
+  `28c02fb5`, 2026-05-20 06:31 UTC) shipped before the slug was fully reconciled and
+  records `git author.name = "standards-bot[bot]"` in the commit metadata, but the
+  GitHub-side commit attribution and Release author both correctly resolve to
+  `engineering-standards-bot[bot]`. From `v0.1.1` onwards the git `user.name` will
+  match the App slug.
 
 ---
 
@@ -159,7 +171,7 @@ documented checklist and the live settings is a governance bug.
 - `docs/02-implementation-plan.md` §4 (Phase 1 task list).
 - `docs/02-implementation-plan.md` §10 (Phase 7 release workflow & dist protection).
 - `docs/decision-records/0004-single-repo-distribution.md` (single-repo distribution rationale).
-- `docs/release-bot-setup.md` (the `@standards-bot` GitHub App provisioning checklist).
+- `docs/release-bot-setup.md` (the `@engineering-standards-bot` GitHub App provisioning checklist).
 - `docs/release-rollback.md` (the release rollback procedure).
 - `.github/CODEOWNERS` (review routing).
 - `.github/workflows/validate.yml` (the live PR status checks).

@@ -6,7 +6,7 @@ Covers:
 2. ``--all-stacks`` and ``--stack`` are mutually exclusive; passing both fails parsing.
 3. ``--all-stacks`` produces byte-identical output to four separate per-stack runs.
 4. ``.github/workflows/release.yml`` parses, declares ``workflow_dispatch``, has every
-   plan §10 task-2 step, and authenticates as ``@standards-bot``.
+   plan §10 task-2 step, and authenticates as ``@engineering-standards-bot``.
 5. ``.github/workflows/validate.yml`` now has the ``dist-protection-lint`` job with the
    required PR-only conditional + the ADR-0004 reference in the failure message.
 6. ``docs/release-bot-setup.md``, ``docs/release-rollback.md``, and
@@ -147,8 +147,8 @@ def test_release_yml_has_required_step_names(release_yml):
         "Regenerate dist/ via",
         "Regenerate dist/CHANGELOG.md",
         "Regenerate dist/README.md",
-        "Mint an installation token for @standards-bot",
-        "Configure git as standards-bot",
+        "Mint an installation token for @engineering-standards-bot",
+        "Configure git as engineering-standards-bot",
         "Commit, tag, and push",
         "Create GitHub Release",
     ]
@@ -203,17 +203,39 @@ def test_dist_protection_lint_failure_message_cites_adr_0004(validate_yml):
 
 
 def test_dist_protection_lint_allows_both_bracketed_and_bare_bot_name(validate_yml):
-    """Permits both `standards-bot[bot]` (the App identity) and `standards-bot` (the bare
+    """Permits both `engineering-standards-bot[bot]` (the App identity) and `engineering-standards-bot` (the bare
     fallback). A future regex tightening that drops the fallback would block legitimate
     releases."""
     yaml_text = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
     # Look for the bash regex pattern that accepts both forms.
-    assert "standards-bot(\\[bot\\])?" in yaml_text
+    assert "engineering-standards-bot(\\[bot\\])?" in yaml_text
 
 
 def test_validate_yml_total_job_count_is_five(validate_yml):
     """Defense-in-depth: catches accidental job removal (the original 4 + Phase-7's new one)."""
     assert len(validate_yml["jobs"]) == 5
+
+
+def test_dist_protection_lint_does_not_pass_invalid_depth_zero_to_git_fetch():
+    """Regression guard for the post-Phase-7 hotfix: `git fetch --depth=0` is
+    rejected by git ("fatal: depth 0 is not a positive number") and failed the
+    very first PR (PR #1) the lint ran on. The correct way to ensure full
+    history is to omit `--depth` (it was already fetched via
+    `actions/checkout` `fetch-depth: 0`). This test prevents the regression
+    from ever sneaking back in."""
+    import re
+
+    yaml_text = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
+    # Match `git fetch` invocations that include `--depth=0` on the same
+    # logical line (ignoring the explanatory comments that document WHY this
+    # is forbidden).
+    offending = re.findall(r"^[^#\n]*\bgit\s+fetch\b[^#\n]*--depth=0[^\n]*$", yaml_text, re.MULTILINE)
+    assert not offending, (
+        "validate.yml has a `git fetch ... --depth=0 ...` invocation; git "
+        "rejects depth 0 as 'not a positive number'. Use `actions/checkout` "
+        "with `fetch-depth: 0` to get full history, then a plain `git fetch` "
+        f"(no --depth) to update refs. Offending lines: {offending!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
