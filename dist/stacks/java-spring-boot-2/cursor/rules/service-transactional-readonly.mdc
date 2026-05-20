@@ -1,0 +1,111 @@
+---
+description: "Read-Only Default at the Service Class Level — apply to Spring Boot 2.7 (legacy)"
+globs: ["**/service/**/*.java", "**/usecase/**/*.java"]
+alwaysApply: false
+---
+
+# Read-Only Default at the Service Class Level
+
+## 1. Context & Architectural Intent
+
+AI-generated `@Service` classes routinely annotate either the entire class with `@Transactional`
+(read-write by default) or annotate individual methods with `@Transactional` without
+distinguishing reads from writes. The result is that pure-read methods (`findById`, `list`,
+`search`) open read-write transactions — wasting Hibernate's flush-skip optimization, defeating
+read-replica routing in multi-DB topologies, and obscuring the method's intent.
+
+The correct pattern, codified in Spring's official guidance and reinforced by JetBrains Junie,
+is `@Transactional(readOnly = true)` at the class level with explicit `@Transactional`
+(read-write) overrides on individual mutating methods. This rule mandates that pattern. It
+pairs with `transactional-boundaries.md` (no I/O inside transactions) and
+`self-invocation-trap.md` (proxy invocation discipline) to form the three-rule transactional
+discipline at the service layer.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. Every `@Service` Class Carries `@Transactional(readOnly = true)`
+
+* **Rule**: Every class annotated `@Service` (or `@Component` used as a service) MUST be
+  annotated `@Transactional(readOnly = true)` at the class level. Mutating methods MUST
+  individually override with `@Transactional` (which defaults to read-write).
+* **Rationale**: `readOnly = true` (a) signals to Hibernate to skip dirty-checking on commit
+  (measurable throughput gain on read-heavy paths); (b) enables read-replica routing for any
+  `RoutingDataSource` that keys on `TransactionSynchronizationManager.isCurrentTransactionReadOnly()`;
+  (c) is the most legible documentation of method intent. Mutating methods stand out as the
+  exception, making cross-cutting audits of "what writes to the DB" trivial.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — every method opens a read-write tx, even pure reads
+  @Service
+  @Transactional
+  @RequiredArgsConstructor
+  public class OrderService {
+      private final OrderRepository orderRepository;
+      public Order findById(Long id) { /* pure read, but in r/w tx */ }
+      public Order create(OrderRequest req) { /* write */ }
+  }
+
+  // ✅ CORRECT — read-only by default; mutations are explicit
+  @Service
+  @Transactional(readOnly = true)
+  @RequiredArgsConstructor
+  public class OrderService {
+      private final OrderRepository orderRepository;
+
+      public Order findById(Long id) {
+          return orderRepository.findById(id).orElseThrow(() -> new OrderNotFoundException(id));
+      }
+
+      @Transactional(timeout = 5)
+      public Order create(OrderRequest req) {
+          return orderRepository.save(new Order(req));
+      }
+  }
+  ```
+
+### 2.2. Mutating Overrides MUST Be Explicit `@Transactional`, Not `@Transactional(readOnly = false)`
+
+* **Rule**: A mutating method MUST be annotated `@Transactional` (with any necessary `timeout`,
+  `propagation`, `isolation` attributes), NOT `@Transactional(readOnly = false)`. The plain
+  `@Transactional` reads as "this method writes"; the negated form `readOnly = false` reads as
+  "this method un-does the class-level readOnly," which adds cognitive load without semantic
+  benefit.
+* **Rationale**: Style consistency makes the writer-set greppable: `rg '@Transactional$'` and
+  `rg '@Transactional\('` together enumerate every write site in the codebase.
+
+### 2.3. Query-Only `@Repository` Methods Do NOT Need Their Own `@Transactional`
+
+* **Rule**: When a `@Service` is properly annotated `@Transactional(readOnly = true)`, the
+  repository methods it calls execute inside the service's transaction context. Annotating
+  individual repository methods with `@Transactional` is redundant and MUST NOT be done unless
+  the method explicitly needs `Propagation.REQUIRES_NEW` (a rare, documented case).
+* **Rationale**: Stacking `@Transactional` on both the service and the repository creates
+  duplicate proxy interception with no benefit. The service-level annotation is the single
+  source of truth.
+
+### 2.4. Multi-Statement Reads That MUST Be Atomic Use `@Transactional(readOnly = true)`
+
+* **Rule**: When a read path executes multiple repository queries that MUST see a consistent
+  snapshot (e.g., reading two related aggregates), the controlling method MUST inherit the
+  class-level `@Transactional(readOnly = true)`. It MUST NOT be annotated
+  `@Transactional(readOnly = false)` for "safety."
+* **Rationale**: A read-only transaction still provides snapshot isolation at the configured
+  isolation level (`READ_COMMITTED` by default). Switching to read-write to "be safe" leaks
+  the read-write semantics into a path with no writes, defeating the readOnly optimization
+  and replica routing.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/service/**/*.java` or
+`**/usecase/**/*.java`:
+
+1. **Default every new `@Service` class to `@Transactional(readOnly = true)` at the class
+   level.** Override individual mutating methods with `@Transactional` + `timeout`.
+2. **When refactoring a `@Service` class that has `@Transactional` at the class level (no
+   `readOnly`), flip it to `@Transactional(readOnly = true)` and annotate mutating methods
+   individually.** Surface the change in the PR description with a one-line note about the
+   readOnly optimization.
+3. **Never write `@Transactional(readOnly = false)`** — use plain `@Transactional`.
+4. **Do not annotate repository methods with `@Transactional` unless explicitly required for
+   `REQUIRES_NEW` propagation.** The service-level transaction is the surface area.

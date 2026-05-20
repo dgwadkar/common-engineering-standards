@@ -1,0 +1,111 @@
+---
+description: "Prohibition of Generic Runtime Exceptions — apply to Spring Boot 3"
+globs: ["**/advice/**/*.java", "**/errors/**/*.java", "**/exception/**/*.java"]
+alwaysApply: false
+---
+
+# Prohibition of Generic Runtime Exceptions
+
+## 1. Context & Architectural Intent
+
+We operate a centralized, strongly-typed error-resolution architecture rooted in
+`@RestControllerAdvice`. AI-generated Spring Boot code routinely violates this discipline by
+instantiating `java.lang.RuntimeException`, `java.lang.Exception`, or `java.lang.Throwable` at the
+service or controller layer — typically as a quick-fix when a return value cannot represent
+failure. The downstream consequences are severe: generic exceptions strip the failure of its
+domain meaning, force upstream callers into blind `catch` blocks, and produce uninformative
+`500 Internal Server Error` responses that leak nothing actionable to consumer clients.
+
+Because LLM training corpora are saturated with tutorial snippets that throw `RuntimeException`
+("for simplicity"), the AI must be explicitly steered toward a typed domain-exception hierarchy
+on every generation. This rule is one of the two foundational baseline rules of the corpus
+(Logic Hole #1) and is paired with `prohibit-blind-catch` (Logic Hole #2) and `unified-api-error`
+(the response-shape mandate).
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. No Direct Instantiation of `RuntimeException`, `Exception`, or `Throwable`
+
+* **Rule**: A method body MUST NOT contain `throw new RuntimeException(...)`,
+  `throw new Exception(...)`, or `throw new Throwable(...)`. Every thrown exception MUST be a
+  concrete subclass of the application's abstract base domain exception (e.g., `DomainException`)
+  that carries an `errorCode` and a deterministic HTTP status mapping.
+* **Rationale**: Generic exceptions conceal root cause, defeat exception-typed routing in the
+  `@RestControllerAdvice`, and surface as opaque `500`s. A typed hierarchy lets the advice map
+  each subtype to its correct HTTP status, error code, and (optional) operator runbook link.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN
+  public Order findById(Long id) {
+      Order order = orderRepository.findById(id).orElse(null);
+      if (order == null) {
+          throw new RuntimeException("Order " + id + " not found");
+      }
+      return order;
+  }
+
+  // ✅ CORRECT
+  public Order findById(Long id) {
+      return orderRepository.findById(id)
+          .orElseThrow(() -> new OrderNotFoundException(id));
+  }
+
+  // The exception type lives in the domain boundary, NOT the service:
+  public final class OrderNotFoundException extends DomainException {
+      public OrderNotFoundException(Long id) {
+          super("ORDER_NOT_FOUND", "Order " + id + " does not exist", HttpStatus.NOT_FOUND);
+      }
+  }
+  ```
+
+### 2.2. No Re-wrapping Into Generic Exceptions
+
+* **Rule**: When a lower-layer exception must be re-raised as a domain exception, the wrapper
+  MUST be a concrete domain subclass (e.g., `OrderPersistenceException`), never
+  `new RuntimeException(cause)` or `new IllegalStateException(cause)`.
+* **Rationale**: Re-wrapping into `RuntimeException` removes any chance for the advice to route
+  the error to the correct HTTP status. The wrapper must carry the same domain semantics as
+  primary throws.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN
+  try {
+      paymentClient.charge(order);
+  } catch (PaymentGatewayTimeoutException e) {
+      throw new RuntimeException("Payment failed", e);
+  }
+
+  // ✅ CORRECT
+  try {
+      paymentClient.charge(order);
+  } catch (PaymentGatewayTimeoutException e) {
+      throw new PaymentProcessingException("Gateway timed out for order " + order.id(), e);
+  }
+  ```
+
+### 2.3. `IllegalStateException` and `IllegalArgumentException` Are Last-Resort, Not Defaults
+
+* **Rule**: `IllegalStateException` and `IllegalArgumentException` MAY be used for genuinely
+  programmer-error invariants (e.g., a private helper called with a documented precondition
+  violation that should never occur in production). They MUST NOT be used for business-rule
+  failures, validation failures, or expected runtime conditions.
+* **Rationale**: `IllegalStateException` and `IllegalArgumentException` are signals of "this
+  should never happen" — using them for expected business failures (e.g., "user not found",
+  "balance insufficient") conflates programmer error with domain error, fragmenting the
+  exception taxonomy and confusing the advice's routing logic.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code anywhere in the project:
+
+1. **Never emit `throw new RuntimeException(...)`** or `throw new Exception(...)`. If a domain
+   exception type does not yet exist for the failure mode, create one as a subclass of the
+   application's `DomainException` base in the appropriate `exception/` package and reference it.
+2. **When refactoring a method that throws `RuntimeException`**, propose the named domain
+   exception in the same change. Do not leave the generic throw in place "for now."
+3. **When the user pastes code containing `RuntimeException`**, flag every occurrence and
+   propose a typed replacement, even if the user's request did not mention exception handling.
+4. **Reject `throw new IllegalStateException(...)` for business-rule failures.** Reserve it for
+   genuine invariants that the programmer believes cannot occur at runtime.

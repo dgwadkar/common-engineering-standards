@@ -1,0 +1,168 @@
+---
+description: "Security Baselines — Secrets, Input Boundaries, and OWASP Top 10 Anchors — apply to NestJS 10"
+alwaysApply: true
+---
+
+# Security Baselines — Secrets, Input Boundaries, and OWASP Top 10 Anchors
+
+## 1. Context & Architectural Intent
+
+Security baselines are the cross-cutting safety net that applies to every service in every
+language. AI agents are notoriously prone to security regressions: hard-coding secrets in
+source, generating SQL via string concatenation, logging full request bodies (which may
+contain PII or credentials), and disabling validation "to make the test pass." This rule
+mandates the baseline controls that prevent the most common AI-introduced security defects,
+keyed to the OWASP Top 10:2021.
+
+The rule is `cursor_mode: always` because security applies to every file — a single
+sourced-secret leak can compromise the entire deployment, and the rule's text is short
+enough that the always-on token cost is justified. It pairs with the controller-boundary
+rules (`validation-boundaries.md`, `dto-record-mandate.md`) which close the input-side OWASP
+API3:2023 mass-assignment vector specifically for Spring Boot, and with the
+`logging-telemetry.md` rule which closes the log-redaction vector.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. No Hard-Coded Secrets — Ever
+
+* **Rule**: Source files MUST NOT contain literal secrets — API keys, OAuth client secrets,
+  JWT signing keys, database passwords, encryption keys, third-party tokens, or any value
+  that an attacker with read access to the repo could weaponize. The legal sources are (a)
+  environment variables read through the framework's typed config (e.g., Spring
+  `@ConfigurationProperties`), (b) the org's secrets manager (Vault, AWS Secrets Manager,
+  GCP Secret Manager), (c) per-environment encrypted secret files (`.env.encrypted`,
+  `secrets.enc.yaml`) under the org's KMS.
+* **Rationale**: Hard-coded secrets in source are the most-cited cause of org-wide breach
+  events (OWASP A02:2021 Cryptographic Failures, A07:2021 Identification and Authentication
+  Failures). Git history retains them after deletion; rotation is forensic-grade work.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN
+  private static final String JWT_SECRET = "s3cr3t-d0n7-1eak";
+  private static final String STRIPE_KEY = "sk_live_<DO_NOT_HARDCODE>";
+
+  // ✅ CORRECT — typed config from environment / secrets manager
+  @ConfigurationProperties("acme.security")
+  public record SecurityProperties(
+      @NotBlank String jwtSecret,        // sourced from JWT_SECRET env var
+      @NotBlank String stripeApiKey      // sourced from secrets manager via Spring Cloud Vault
+  ) {}
+  ```
+
+  ```yaml
+  acme:
+    security:
+      jwt-secret: ${JWT_SECRET}
+      stripe-api-key: ${STRIPE_API_KEY}
+  ```
+
+### 2.2. No Dynamic SQL via String Concatenation
+
+* **Rule**: Database queries MUST be parameterized — JPQL with named parameters, JPA
+  `Specification`, Spring Data method-name derivation, Spring `JdbcTemplate` with `?`
+  parameters, or the language's equivalent prepared-statement API. Queries MUST NOT be
+  constructed by concatenating user input into a SQL string.
+* **Rationale**: SQL injection (OWASP A03:2021 Injection) remains in the top three. AI
+  agents reach for string concatenation as the "obvious" implementation when the user asks
+  for a "dynamic search." The correct shape is a `Specification`, a `Criteria` query, or a
+  dynamic-parameter approach — never `"WHERE name = '" + input + "'"`.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — SQL injection
+  String sql = "SELECT * FROM users WHERE email = '" + userInput + "'";
+  jdbcTemplate.queryForList(sql);
+
+  // ✅ CORRECT — parameterized
+  jdbcTemplate.queryForList(
+      "SELECT * FROM users WHERE email = ?",
+      userInput
+  );
+
+  // ✅ CORRECT — Spring Data method derivation
+  Optional<User> findByEmail(String email);
+
+  // ✅ CORRECT — Specification for dynamic search
+  public static Specification<User> hasEmailAndStatus(String email, UserStatus status) {
+      return (root, query, cb) -> cb.and(
+          cb.equal(root.get("email"), email),
+          cb.equal(root.get("status"), status)
+      );
+  }
+  ```
+
+### 2.3. Authentication and Authorization Are Method-Level, Not URL-Pattern-Only
+
+* **Rule**: Every protected endpoint MUST be protected by a method-level `@PreAuthorize`
+  (Spring Security), `@RolesAllowed` (Jakarta), or equivalent. URL-pattern-only protection
+  (`http.authorizeHttpRequests().requestMatchers("/api/admin/**").hasRole("ADMIN")`) MUST
+  be backed by method-level checks AS WELL — the URL pattern is the defense-in-depth, not
+  the primary check.
+* **Rationale**: URL-pattern-only protection is fragile to refactoring: rename the
+  controller's `@RequestMapping`, and the rule no longer matches. Method-level checks travel
+  with the method. Defense-in-depth means both.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — URL pattern only; one rename breaks the check
+  http.authorizeHttpRequests()
+      .requestMatchers("/api/admin/**").hasRole("ADMIN");
+
+  @RestController
+  @RequestMapping("/api/admin")
+  public class AdminController {
+      @DeleteMapping("/users/{id}")
+      public void delete(@PathVariable Long id) { /* unprotected if @RequestMapping renamed */ }
+  }
+
+  // ✅ CORRECT — both URL pattern AND method-level
+  http.authorizeHttpRequests()
+      .requestMatchers("/api/admin/**").hasRole("ADMIN");
+
+  @RestController
+  @RequestMapping("/api/admin")
+  public class AdminController {
+      @PreAuthorize("hasRole('ADMIN')")
+      @DeleteMapping("/users/{id}")
+      public void delete(@PathVariable Long id) { /* still protected after rename */ }
+  }
+  ```
+
+### 2.4. Logging MUST NOT Emit Secrets, Credentials, or PII
+
+* **Rule**: Log statements MUST NOT include values from `password`, `token`, `secret`,
+  `apiKey`, `creditCard`, `ssn`, `dob`, or any field declared `@Sensitive` (org-internal
+  annotation). The full request body MUST NOT be logged unless the body type implements a
+  `redact()` method that strips sensitive fields. See `logging-telemetry.md` for the full
+  log-redaction contract.
+* **Rationale**: Logs are typically retained for 30+ days across multiple stores
+  (app logs, aggregation, SIEM). A single leaked credential in a log line is a credential to
+  rotate everywhere. PII in logs creates GDPR / CCPA exposure.
+
+### 2.5. CORS, CSRF, Security Headers Are Configured Explicitly — Not Disabled
+
+* **Rule**: A new project's Spring Security (or framework equivalent) configuration MUST
+  explicitly set CORS allowed origins (no `*`), CSRF protection (enabled for stateful
+  endpoints; explicitly disabled with a documented reason for stateless JWT APIs), and the
+  security-headers baseline (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Strict-Transport-Security` with at least 1-year max-age and `includeSubDomains`).
+* **Rationale**: Defaults are mostly correct, but `csrf().disable()` "to make the test pass"
+  is a common AI-introduced regression. Explicit configuration makes the choice reviewable.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring ANY code:
+
+1. **Never emit a literal credential or API key in source.** If the user asks for one, decline
+   and propose the typed-config + env-var pattern.
+2. **Never construct SQL by string concatenation.** Use parameterized queries, Spring Data
+   derivation, or `Specification` / `Criteria` for dynamic search.
+3. **Never propose `csrf().disable()` or `cors().anyOrigin()` "for the demo."** Explain the
+   risk and propose the minimal correct configuration.
+4. **When generating a controller, also propose the `@PreAuthorize` (or equivalent) on
+   every protected method** — defense-in-depth, not URL-pattern-only.
+5. **Never log full request bodies or response bodies.** If the user asks, propose the
+   `redact()`-method pattern or selective field logging.
+6. **When the user pastes code with a hard-coded secret, flag it as a critical defect** and
+   propose the typed-config refactor.

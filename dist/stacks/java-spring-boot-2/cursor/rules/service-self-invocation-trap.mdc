@@ -1,0 +1,146 @@
+---
+description: "Prohibition of Self-Invocation Across Transactional Proxy Boundaries — apply to Spring Boot 2.7 (legacy)"
+globs: ["**/service/**/*.java", "**/usecase/**/*.java"]
+alwaysApply: false
+---
+
+# Prohibition of Self-Invocation Across Transactional Proxy Boundaries
+
+## 1. Context & Architectural Intent
+
+Spring's `@Transactional` (and other AOP-driven annotations: `@Cacheable`, `@Async`,
+`@PreAuthorize`, `@Validated`) are implemented via dynamic proxies. When external code calls a
+proxied method, the proxy intercepts the call, opens the transaction, invokes the underlying
+method, and commits or rolls back on return. But when a method on a Spring-managed bean calls
+**another method on the same instance via `this.someMethod()`**, the proxy is bypassed entirely
+— the inner method's `@Transactional` annotation is silently inert.
+
+AI-generated code routinely contains this trap: a public service method calls a private (or
+package-private) `@Transactional` helper on the same class, expecting a transaction. The
+transaction never opens. Bugs surface in production as "the rollback didn't fire" or "the
+isolation level wasn't applied" — diagnostics so disconnected from the cause that they often
+go unresolved for quarters.
+
+This rule mandates the two safe patterns (entry-method `@Transactional`, OR extract-to-bean)
+and forbids the self-invocation shape entirely.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. No `@Transactional` on a Method Called Only via `this.method()` from Sibling Methods
+
+* **Rule**: A method annotated with any AOP-driven annotation (`@Transactional`, `@Cacheable`,
+  `@Async`, `@PreAuthorize`, `@Validated`) MUST be callable from outside the bean. The proxy
+  is the only legal call site for such methods. Sibling-method self-invocation via `this` is
+  forbidden — either the entry method MUST carry the annotation, or the annotated method MUST
+  be extracted to a separate bean.
+* **Rationale**: The proxy is the AOP interceptor. Self-invocation bypasses the proxy and
+  drops the annotation's effect on the floor. Spring does not warn about this at startup or
+  runtime; the only signal is wrong behavior in production.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — inner @Transactional silently ignored
+  @Service
+  @Transactional(readOnly = true)
+  @RequiredArgsConstructor
+  public class OrderService {
+      private final OrderRepository orderRepository;
+      private final NotificationGateway notifications;
+
+      public void process(OrderRequest req) {
+          this.save(req);              // self-invocation: proxy is bypassed,
+          notifications.notify(req);   // @Transactional below is DEAD
+      }
+
+      @Transactional(timeout = 5)
+      public void save(OrderRequest req) {
+          orderRepository.save(new Order(req));
+      }
+  }
+
+  // ✅ CORRECT (option A): annotate the entry method instead
+  @Service
+  @Transactional(readOnly = true)
+  @RequiredArgsConstructor
+  public class OrderService {
+      private final OrderRepository orderRepository;
+      private final NotificationGateway notifications;
+
+      @Transactional(timeout = 5)
+      public void process(OrderRequest req) {
+          orderRepository.save(new Order(req));
+          notifications.notify(req);
+      }
+  }
+
+  // ✅ CORRECT (option B): extract the @Transactional method to a separate bean
+  @Service
+  @RequiredArgsConstructor
+  public class OrderPersistenceService {
+      private final OrderRepository orderRepository;
+
+      @Transactional(timeout = 5)
+      public void save(OrderRequest req) {
+          orderRepository.save(new Order(req));
+      }
+  }
+
+  @Service
+  @Transactional(readOnly = true)
+  @RequiredArgsConstructor
+  public class OrderService {
+      private final OrderPersistenceService persistence;     // proxy-routed call
+      private final NotificationGateway notifications;
+
+      public void process(OrderRequest req) {
+          persistence.save(req);          // proxy-mediated — @Transactional fires
+          notifications.notify(req);
+      }
+  }
+  ```
+
+### 2.2. The Same Trap Applies to `@Cacheable`, `@Async`, `@PreAuthorize`, `@Validated`
+
+* **Rule**: Every AOP-driven annotation (not just `@Transactional`) carries the
+  self-invocation trap. The two safe patterns are identical: annotate the entry method, or
+  extract to a separate bean.
+* **Rationale**: All Spring AOP is proxy-based by default. `@Cacheable` self-invocation means
+  the cache is never consulted; `@Async` self-invocation means the method runs synchronously;
+  `@PreAuthorize` self-invocation means the security check is skipped. The latter is a
+  security defect.
+
+### 2.3. Internal Helpers SHOULD NOT Carry AOP Annotations
+
+* **Rule**: A `private` or package-private helper method that exists only to be called by
+  sibling methods on the same class SHOULD NOT carry AOP-driven annotations. The intent of
+  such helpers is "internal implementation detail"; AOP-driven annotations imply "external
+  contract."
+* **Rationale**: Placing `@Transactional` on a private helper is a category error — it expects
+  proxy interception that cannot happen. The only legal way to AOP-annotate an internal
+  helper is to make it public and have external code call it through the proxy — which by
+  definition means it is not an internal helper.
+
+### 2.4. The `AopContext.currentProxy()` Workaround Is Forbidden
+
+* **Rule**: The `((OrderService) AopContext.currentProxy()).save(req)` workaround MUST NOT be
+  used. The two safe patterns (annotate the entry method, or extract to a bean) are always
+  preferable.
+* **Rationale**: `AopContext.currentProxy()` requires `@EnableAspectJAutoProxy(exposeProxy = true)`
+  globally, leaks Spring's AOP details into business code, and creates a circular dependency
+  between the bean and its own proxy that obscures the code's intent.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/service/**/*.java` or
+`**/usecase/**/*.java`:
+
+1. **Before placing `@Transactional` (or any AOP-driven annotation) on a method, verify the
+   method is callable from outside the bean.** If only sibling methods call it, refactor: move
+   the annotation to the entry method, OR extract the annotated method to a separate bean.
+2. **When the user shows code where a public method calls `this.someMethod()` and `someMethod`
+   is `@Transactional`, flag the self-invocation trap** and propose one of the two safe
+   patterns in the response.
+3. **Never propose `AopContext.currentProxy()` as a fix.** Always propose entry-method
+   annotation or bean extraction.
+4. **For any `@Cacheable`, `@Async`, `@PreAuthorize`, `@Validated` placement, apply the same
+   self-invocation check.** The trap is identical across all AOP-driven annotations.
