@@ -7,6 +7,13 @@
 > Newest releases first. Each `## v<X.Y.Z>` block lists `source/` rule additions,
 > removals, frontmatter changes, and body-only edits relative to the previous tag.
 
+## v0.1.1 — 2026-05-20
+
+Changes since `v0.1.0`.
+
+_No source-rule changes since the previous release._
+_This release captures compiler, schema, or template changes only — see the git history for details._
+
 ## v0.1.0 — 2026-05-20
 
 First release — initial corpus snapshot.

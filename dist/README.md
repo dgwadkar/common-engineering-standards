@@ -6,13 +6,13 @@
 
 # Engineering Standards — Distribution Index
 
-- **Version**: `v0.1.0`
+- **Version**: `v0.1.1`
 - **Released**: 2026-05-20
 - **Changelog**: [CHANGELOG.md](./CHANGELOG.md)
 
 This directory is the **compiled output** of the Engineering Standards corpus authored under `source/`. Consumer repositories pull a stack's subtree via the `@org/standards-sync` CLI; see the consumer-side documentation for the sync flow.
 
-Compiled artifacts are regenerated **only** by the release workflow under the `@standards-bot` GitHub App identity. Human-authored edits to any file inside this directory are rejected by the `dist-protection-lint` PR status check; see ADR-0004 for the four-guard protection model.
+Compiled artifacts are regenerated **only** by the release workflow under the `@engineering-standards-bot` GitHub App identity. Human-authored edits to any file inside this directory are rejected by the `dist-protection-lint` PR status check; see ADR-0004 for the four-guard protection model.
 
 ## Stacks
 
@@ -63,5 +63,5 @@ git tag --list 'v*' --sort=-version:refname
 Audit the bot-authored release commits:
 
 ```bash
-git log --author='standards-bot' --pretty='%h %ai %s' -- dist/
+git log --author='engineering-standards-bot' --pretty='%h %ai %s' -- dist/
 ```
