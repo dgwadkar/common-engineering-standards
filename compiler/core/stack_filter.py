@@ -34,6 +34,8 @@ and the corpus has not needed it. Phase 4+ may extend if a real rule demands it.
 from __future__ import annotations
 
 import dataclasses
+import json
+import pathlib
 import re
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -52,40 +54,46 @@ class Stack:
     human_name: str  # human-readable name for the description line
 
 
-# The canonical Phase-4 stack catalog. Each pinned version is the latest stable in its line at
-# the time of Phase-4 authoring; bump these here as the rule corpus stays stable across the
-# bump. Phase 8 (consumer sync) detects the consumer's pinned version dynamically; this catalog
-# is what the central repo's release workflow compiles AGAINST.
-STACKS: dict[str, Stack] = {
-    "java-spring-boot-3": Stack(
-        id="java-spring-boot-3",
-        language="java",
-        framework="spring-boot",
-        framework_version="3.2.0",
-        human_name="Spring Boot 3",
-    ),
-    "java-spring-boot-2": Stack(
-        id="java-spring-boot-2",
-        language="java",
-        framework="spring-boot",
-        framework_version="2.7.18",
-        human_name="Spring Boot 2.7 (legacy)",
-    ),
-    "typescript-nestjs-10": Stack(
-        id="typescript-nestjs-10",
-        language="typescript",
-        framework="nestjs",
-        framework_version="10.3.0",
-        human_name="NestJS 10",
-    ),
-    "python-fastapi-0-110": Stack(
-        id="python-fastapi-0-110",
-        language="python",
-        framework="fastapi",
-        framework_version="0.110.0",
-        human_name="FastAPI 0.110",
-    ),
-}
+# Path to the Phase-8 canonical catalog (`schemas/stacks.json`). Both the Python compiler
+# (this module) and the Node consumer-sync CLI consume this file so the two implementations
+# cannot drift. The lookup walks up from this file's parent to the repo root because the
+# module may be imported from various working directories (CI runners, ad-hoc scripts).
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+_STACKS_CATALOG_PATH = _REPO_ROOT / "schemas" / "stacks.json"
+
+
+def _load_stack_catalog() -> dict[str, Stack]:
+    """Loads the canonical stack catalog from `schemas/stacks.json`.
+
+    Phase-8 lesson: this used to be a hard-coded dict in this module that drifted from a
+    parallel hard-coded dict in `tools/generate_dist_readme.py`. Both now read the same
+    JSON file. The previous dict layout is preserved so existing imports of `STACKS`
+    continue to work.
+    """
+    with open(_STACKS_CATALOG_PATH, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    # The JSON's `properties.stacks.const` holds the canonical descriptor list. We read it
+    # from `.const` rather than a top-level array because the file is also a JSON Schema —
+    # the const-array embedding lets `jsonschema.validate()` validate any future schema-only
+    # consumer's input shape against the same source.
+    descriptors = catalog["properties"]["stacks"]["const"]
+    out: dict[str, Stack] = {}
+    for desc in descriptors:
+        out[desc["id"]] = Stack(
+            id=desc["id"],
+            language=desc["language"],
+            framework=desc["framework"],
+            framework_version=desc["framework_version"],
+            human_name=desc["human_name"],
+        )
+    return out
+
+
+# The canonical stack catalog, loaded lazily at import time from schemas/stacks.json.
+# Bump pinned versions in that JSON file (not here) — this constant is a typed view onto
+# the catalog. Phase 8 (consumer sync) reads the SAME file from Node so detection logic
+# stays aligned with what the compiler emits.
+STACKS: dict[str, Stack] = _load_stack_catalog()
 
 
 class StackFilterError(ValueError):

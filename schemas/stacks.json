@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering-standards.example.com/schemas/stacks.json",
+  "title": "Engineering Standards — Stack Catalog",
+  "description": "Canonical, language-neutral catalog of the (language, framework, pinned-version) stacks the standards corpus ships for. This file is BOTH a JSON Schema (it validates the shape of stack descriptor objects via `$defs/StackDescriptor`) AND the live catalog (the four canonical stacks are pinned via `properties.stacks.const`). The Python compiler (`compiler/core/stack_filter.py`) and the Node consumer sync CLI (`packages/standards-sync/`) both load this file as their stack catalog so the two implementations cannot drift. Adding a fifth stack is a one-entry append to `stacks.const` PLUS a new fixture under `fixtures/` PLUS a new golden tree under `tests/golden/`.",
+  "$comment": "Phase 8 deliverable per `docs/02-implementation-plan.md` §11 task 1 (Phase-7 lesson §7-b — single source of truth for the stack catalog). Adding this file eliminates the previous duplication between `compiler.core.stack_filter.STACKS` and `tools.generate_dist_readme.KNOWN_STACKS`; both now read this catalog at startup, and the Phase-7 drift guard (`tests/test_generate_dist_readme.py::test_known_stacks_align_with_compiler_stack_filter`) becomes a trivial identity check. The Node CLI consumes the same file via `require('../../../schemas/stacks.json')` (or via a copy bundled at publish time — see `packages/standards-sync/package.json::files`).",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stacks"],
+
+  "properties": {
+    "stacks": {
+      "type": "array",
+      "description": "Array of stack descriptors. Order is significant only for human readability; the compiler and the sync CLI key lookups by `id`.",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/StackDescriptor" },
+
+      "const": [
+        {
+          "id": "java-spring-boot-3",
+          "language": "java",
+          "framework": "spring-boot",
+          "framework_version": "3.2.0",
+          "human_name": "Spring Boot 3",
+          "description": "Modern Spring Boot 3.x microservices using Spring Data JPA, Validation, and Lombok.",
+          "detection": {
+            "manifest_files": ["pom.xml", "build.gradle.kts", "build.gradle"],
+            "indicators": [
+              {
+                "kind": "maven_parent",
+                "group_id": "org.springframework.boot",
+                "artifact_id": "spring-boot-starter-parent",
+                "version_range": ">=3.0.0 <4.0.0"
+              },
+              {
+                "kind": "maven_dependency",
+                "group_id": "org.springframework.boot",
+                "artifact_id_prefix": "spring-boot-starter",
+                "version_range": ">=3.0.0 <4.0.0"
+              },
+              {
+                "kind": "gradle_plugin",
+                "plugin_id": "org.springframework.boot",
+                "version_range": ">=3.0.0 <4.0.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "java-spring-boot-2",
+          "language": "java",
+          "framework": "spring-boot",
+          "framework_version": "2.7.18",
+          "human_name": "Spring Boot 2.7 (legacy)",
+          "description": "Legacy Spring Boot 2.7.x services mid-migration to 3.x — narrower rule set.",
+          "detection": {
+            "manifest_files": ["pom.xml", "build.gradle.kts", "build.gradle"],
+            "indicators": [
+              {
+                "kind": "maven_parent",
+                "group_id": "org.springframework.boot",
+                "artifact_id": "spring-boot-starter-parent",
+                "version_range": ">=2.0.0 <3.0.0"
+              },
+              {
+                "kind": "maven_dependency",
+                "group_id": "org.springframework.boot",
+                "artifact_id_prefix": "spring-boot-starter",
+                "version_range": ">=2.0.0 <3.0.0"
+              },
+              {
+                "kind": "gradle_plugin",
+                "plugin_id": "org.springframework.boot",
+                "version_range": ">=2.0.0 <3.0.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "typescript-nestjs-10",
+          "language": "typescript",
+          "framework": "nestjs",
+          "framework_version": "10.3.0",
+          "human_name": "NestJS 10",
+          "description": "TypeScript microservices on NestJS 10.x.",
+          "detection": {
+            "manifest_files": ["package.json"],
+            "indicators": [
+              {
+                "kind": "npm_dependency",
+                "package_name": "@nestjs/core",
+                "version_range": ">=10.0.0 <11.0.0"
+              },
+              {
+                "kind": "npm_dependency",
+                "package_name": "@nestjs/common",
+                "version_range": ">=10.0.0 <11.0.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "python-fastapi-0-110",
+          "language": "python",
+          "framework": "fastapi",
+          "framework_version": "0.110.0",
+          "human_name": "FastAPI 0.110",
+          "description": "Python microservices on FastAPI 0.110.x.",
+          "detection": {
+            "manifest_files": ["pyproject.toml"],
+            "indicators": [
+              {
+                "kind": "pep621_dependency",
+                "package_name": "fastapi",
+                "version_range": ">=0.110.0 <0.111.0"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+
+  "$defs": {
+    "StackDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "language",
+        "framework",
+        "framework_version",
+        "human_name",
+        "description",
+        "detection"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable stack identifier (kebab-case, lowercase). The compiler emits to `dist/stacks/<id>/`; consumers receive this id in the sync report.",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "language": {
+          "type": "string",
+          "description": "Primary programming language for the stack. Matches `scope.language` in source-rule frontmatter.",
+          "enum": ["java", "typescript", "python", "go", "rust"]
+        },
+        "framework": {
+          "type": "string",
+          "description": "Framework identifier within the language. Matches `scope.framework` in source-rule frontmatter.",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "framework_version": {
+          "type": "string",
+          "description": "Pinned full semver against which `scope.framework_version` ranges are matched. The compiler keeps this as a single concrete version; the sync CLI's detection logic uses the descriptor's `detection.indicators[].version_range` to recognise the stack in the wild.",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "human_name": {
+          "type": "string",
+          "description": "Human-readable name used in the README index and in the Cursor MDC `description` line.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "description": "One-line prose description used in `dist/README.md`.",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "detection": {
+          "type": "object",
+          "description": "Recipe the consumer-sync CLI uses to recognise this stack from a project manifest. Read by `packages/standards-sync/src/detect-stack.js`. Not read by the Python compiler.",
+          "additionalProperties": false,
+          "required": ["manifest_files", "indicators"],
+          "properties": {
+            "manifest_files": {
+              "type": "array",
+              "description": "Manifest filenames to look for in the consumer's project root. ANY match opens the file for indicator evaluation; ALL indicators in the descriptor must then match for the stack to be selected.",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+$"
+              }
+            },
+            "indicators": {
+              "type": "array",
+              "description": "Recognisable signals in a manifest file that confirm this stack. The sync CLI evaluates indicators top-to-bottom; the FIRST matching indicator selects the stack (subsequent indicators are not consulted). This list is therefore ordered most-specific-first.",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/StackIndicator" }
+            }
+          }
+        }
+      }
+    },
+    "StackIndicator": {
+      "type": "object",
+      "description": "One detection signal. Each `kind` is interpreted by a corresponding detector module in `packages/standards-sync/src/detect-stack.js`.",
+      "required": ["kind"],
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "group_id", "artifact_id", "version_range"],
+          "properties": {
+            "kind": { "const": "maven_parent" },
+            "group_id": { "type": "string" },
+            "artifact_id": { "type": "string" },
+            "version_range": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "group_id", "version_range"],
+          "properties": {
+            "kind": { "const": "maven_dependency" },
+            "group_id": { "type": "string" },
+            "artifact_id": { "type": "string" },
+            "artifact_id_prefix": { "type": "string" },
+            "version_range": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "plugin_id", "version_range"],
+          "properties": {
+            "kind": { "const": "gradle_plugin" },
+            "plugin_id": { "type": "string" },
+            "version_range": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "package_name", "version_range"],
+          "properties": {
+            "kind": { "const": "npm_dependency" },
+            "package_name": { "type": "string" },
+            "version_range": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "package_name", "version_range"],
+          "properties": {
+            "kind": { "const": "pep621_dependency" },
+            "package_name": { "type": "string" },
+            "version_range": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

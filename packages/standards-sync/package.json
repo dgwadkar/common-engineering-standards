@@ -1,0 +1,49 @@
+{
+  "name": "@org/standards-sync",
+  "version": "0.1.0",
+  "description": "Consumer-side sync CLI for the Engineering Standards Framework. Detects the project's stack, resolves a pinned or floating standards version, and copies the matching dist/stacks/<stack>/ subtree into the conventional consumer locations.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "standards-sync": "./bin/standards-sync.js"
+  },
+  "main": "./src/index.js",
+  "files": [
+    "bin/",
+    "src/",
+    "stacks.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.js'",
+    "test:verbose": "node --test --test-reporter=spec 'test/*.test.js'",
+    "preversion": "node --test 'test/*.test.js'",
+    "sync-stacks-catalog": "node -e \"import('node:fs').then(({copyFileSync}) => copyFileSync('../../schemas/stacks.json', './stacks.json'))\""
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "tar": "^7.4.3"
+  },
+  "keywords": [
+    "engineering-standards",
+    "ai-engineering",
+    "cursor-rules",
+    "agents-md",
+    "spring-boot",
+    "nestjs",
+    "fastapi"
+  ],
+  "author": "Engineering Standards Council",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/engineering-standards-central/engineering-standards-central.git",
+    "directory": "packages/standards-sync"
+  },
+  "homepage": "https://github.com/engineering-standards-central/engineering-standards-central#readme"
+}

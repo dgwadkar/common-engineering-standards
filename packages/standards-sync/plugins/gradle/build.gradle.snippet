@@ -1,0 +1,15 @@
+// Drop into build.gradle (Groovy DSL). Source: @org/standards-sync (Plan §11 task 6).
+// Pin the standards corpus version via a .standards-version file at the project root,
+// or by passing --version v0.1.0 in args(...).
+
+tasks.register('syncEngineeringStandards', Exec) {
+    group = 'standards'
+    description = 'Sync the org engineering standards via @org/standards-sync (Plan §11).'
+    executable 'npx'
+    args '--yes', '@org/standards-sync@0.1.0', '--project-dir', projectDir.absolutePath
+    standardOutput = new ByteArrayOutputStream()
+    errorOutput = new ByteArrayOutputStream()
+    ignoreExitValue = false
+}
+
+tasks.named('processResources').configure { dependsOn 'syncEngineeringStandards' }
