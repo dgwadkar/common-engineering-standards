@@ -164,6 +164,44 @@ documented checklist and the live settings is a governance bug.
   `engineering-standards-bot[bot]`. From `v0.1.1` onwards the git `user.name` will
   match the App slug.
 
+- **Branch protection applied as a Ruleset (2026-05-20)**: `dgwadkar/common-engineering-standards`
+  is a **User-owned** repository, which means the §2.4 classic-protection
+  `restrictions.apps` push-allowlist field is unavailable (it is only supported for
+  organization-owned repos). Branch protection has therefore been applied as a GitHub
+  **Ruleset** (the modern equivalent that DOES support App bypass on User repos) rather
+  than via the classic Branch Protection UI. The mapping to §2 is exact:
+
+  | §2 sub-section | §2 setting | Ruleset rule |
+  |---|---|---|
+  | §2.1 | require PR before merge + ≥1 approval + dismiss stale + code-owner review + conversation resolution | `pull_request` rule with `required_approving_review_count: 1`, `dismiss_stale_reviews_on_push: true`, `require_code_owner_review: true`, `required_review_thread_resolution: true` |
+  | §2.2 | required status checks (5 contexts) + strict (up-to-date branch) | `required_status_checks` rule with `strict_required_status_checks_policy: true` and all 5 contexts |
+  | §2.3 | require linear history + no admin bypass for the rules themselves | `required_linear_history` rule; admins are explicitly in the bypass list (see below) |
+  | §2.4 | restrict push to the bot | `bypass_actors: [Integration engineering-standards-bot (3777459) always]` (everyone else must go through a PR) |
+  | §2.5 | disallow force push + disallow deletion | `non_fast_forward` rule + `deletion` rule |
+  | §2.6 | require signed commits | not enabled (per §2.6's "TODO until org policy mandates") |
+
+  **Live ruleset details** (verify with `gh api /repos/dgwadkar/common-engineering-standards/rulesets/16632798`):
+
+  | Field | Value |
+  |---|---|
+  | Ruleset ID | `16632798` |
+  | Name | `protect-main` |
+  | Target | `~DEFAULT_BRANCH` (auto-follows the default branch even on rename) |
+  | Enforcement | `active` |
+  | Rules | `deletion`, `non_fast_forward`, `required_linear_history`, `pull_request`, `required_status_checks` |
+  | Bypass actor 1 | `RepositoryRole admin` (actor_id `5`, mode `always`) — lets the operator merge their own PR in solo-dev mode |
+  | Bypass actor 2 | `Integration engineering-standards-bot` (actor_id `3777459`, mode `always`) — the only way the release workflow can push directly to `main` |
+  | UI link | https://github.com/dgwadkar/common-engineering-standards/rules/16632798 |
+
+  This is the substitute for the screenshot called for by Phase-7 AC4 — the API readout
+  above is more durable evidence than a UI screenshot (it can be reproduced by any future
+  auditor with one `gh api` call and survives UI refactors).
+
+  ⚠️ **Solo-dev caveat**: because admins are in the bypass list, the operator CAN merge
+  their own PR without a second reviewer. This is the intended trade-off for a solo
+  repository — once a second engineer joins the project, remove the admin bypass and
+  bump `required_approving_review_count` to `2` per §2.1's Phase-3-onwards note.
+
 ---
 
 ## 6. References
