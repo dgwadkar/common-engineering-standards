@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# tools/git-hooks/pre-commit
+#
+# Defensive client-side pre-commit hook for engineering-standards-central.
+#
+# Purpose
+# -------
+# Block a staged commit when the same commit touches BOTH `source/**` AND
+# `dist/**`. The release workflow (Phase 7, `release.yml`) is the ONLY allowed
+# producer of changes under `dist/`, and a release commit by definition
+# touches only `dist/**` (plus `CHANGELOG.md`). A human commit that mixes
+# `source/` and `dist/` is therefore either a mistake or an attempt to bypass
+# the `dist-protection-lint` PR check (per ADR-0004).
+#
+# This hook is one of three layered guards (see plan §14 R-13):
+#   1. (Server-side) `dist-protection-lint.yml` — a required PR status check.
+#   2. (Server-side) `.github/CODEOWNERS` routes /dist/ to @standards-bot.
+#   3. (Client-side, THIS hook) local pre-commit reject of mixed commits.
+#
+# All three would have to fail simultaneously for a human-authored mutation
+# to land in dist/. This hook makes the third failure mode visible at commit
+# time so authors see the problem locally before pushing.
+#
+# Opt-in
+# ------
+# This hook is NOT installed by default. To enable it, run from the repo root:
+#
+#     git config core.hooksPath tools/git-hooks
+#     chmod +x tools/git-hooks/pre-commit
+#
+# `core.hooksPath` is repo-local by default; the change does not affect other
+# repos on the same machine. To opt back out:
+#
+#     git config --unset core.hooksPath
+#
+# Behaviour
+# ---------
+# Exit code 0 → commit proceeds.
+# Exit code 1 → commit is aborted with a clear error message.
+#
+# The hook only inspects files staged for the in-flight commit
+# (`git diff --cached --name-only`), so it does not interfere with unrelated
+# working-tree state.
+#
+# The `@standards-bot` GitHub App is identified by the presence of the
+# environment variable `STANDARDS_BOT_RELEASE_COMMIT=1` (the release workflow
+# sets this before invoking `git commit`). When set, the mixed-paths check is
+# skipped — the bot is *allowed* to mix paths when generating a release
+# commit. (In practice, `release.yml` regenerates only `dist/**`, but the
+# escape hatch keeps the hook from blocking edge-case re-bases.)
+
+set -euo pipefail
+
+# Release-bot escape hatch.
+if [[ "${STANDARDS_BOT_RELEASE_COMMIT:-0}" == "1" ]]; then
+  exit 0
+fi
+
+# Collect the staged paths. If nothing is staged, defer to git's own check.
+STAGED="$(git diff --cached --name-only)"
+if [[ -z "${STAGED}" ]]; then
+  exit 0
+fi
+
+TOUCHES_SOURCE=0
+TOUCHES_DIST=0
+while IFS= read -r path; do
+  case "${path}" in
+    source/*) TOUCHES_SOURCE=1 ;;
+    dist/*)   TOUCHES_DIST=1 ;;
+  esac
+done <<< "${STAGED}"
+
+if [[ "${TOUCHES_SOURCE}" -eq 1 && "${TOUCHES_DIST}" -eq 1 ]]; then
+  cat >&2 <<'EOF'
+✗ Pre-commit blocked: this commit modifies BOTH source/ and dist/.
+
+  The dist/ tree is regenerated only by .github/workflows/release.yml under
+  the @standards-bot GitHub App identity. Human commits MUST NOT mix source
+  edits with dist edits — this hook is the local enforcement of the rule
+  described in docs/decision-records/0004-single-repo-distribution.md.
+
+  Files involved:
+EOF
+  while IFS= read -r path; do
+    case "${path}" in
+      source/*|dist/*) echo "    - ${path}" >&2 ;;
+    esac
+  done <<< "${STAGED}"
+  cat >&2 <<'EOF'
+
+  Fix:
+    - Unstage the dist/ paths:  git restore --staged dist/
+    - Commit the source/ edit on its own.
+    - Let release.yml regenerate dist/ when a release is cut.
+
+  If you are operating release.yml itself, set
+    STANDARDS_BOT_RELEASE_COMMIT=1
+  in the environment before invoking git commit.
+
+EOF
+  exit 1
+fi
+
+exit 0

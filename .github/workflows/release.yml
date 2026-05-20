@@ -1,0 +1,265 @@
+name: release
+
+# Phase-7 release workflow — `docs/02-implementation-plan.md` §10 task 2.
+#
+# This workflow is the SOLE producer of commits and tags that touch `dist/`. It runs only on
+# manual dispatch by an operator (Standards Architect or AI Enablement PM) and authenticates
+# as the `@standards-bot` GitHub App, scoped to this repository only.
+#
+# Procedure (matches plan §10 task 2 step-by-step):
+#
+#   1. Check out `main` at the chosen tip commit (workflow_dispatch input `ref`).
+#   2. Compute the semver bump from Conventional Commits since the previous tag, OR honor
+#      an operator-supplied `--force-bump` override.
+#   3. Run `python -m compiler --all-stacks --target all --out dist/` — the Phase-7 CLI flag
+#      added in this phase regenerates the entire `dist/stacks/` tree deterministically.
+#   4. Mint a short-lived installation token for `@standards-bot` via the official
+#      `actions/create-github-app-token@v1` action.
+#   5. Commit the regenerated `dist/` tree with the canonical
+#      `chore(release): regenerate dist for v<X.Y.Z>` message. Configures git as the
+#      App identity so `git log --author=standards-bot` is the audit log.
+#   6. Tag the new commit `v<X.Y.Z>` (annotated). Signed if org policy mandates it.
+#   7. Generate `dist/CHANGELOG.md` from rule-id additions/removals/frontmatter changes
+#      since the previous tag, and `dist/README.md` from the live `dist/` tree. Both files
+#      are committed as part of step 5's commit (the commit step runs AFTER these
+#      generators).
+#   8. Create a GitHub Release pointing at the new tag, with the CHANGELOG section as the
+#      release notes.
+#
+# Required repo secrets (operator-provisioned per `docs/release-bot-setup.md`):
+#
+#   STANDARDS_BOT_APP_ID         — The numeric App ID for the @standards-bot GitHub App.
+#   STANDARDS_BOT_PRIVATE_KEY    — The full contents of the App's downloaded .pem file.
+#
+# Branch protection on `main` MUST allow `@standards-bot` to push directly (per
+# `docs/branch-protection-config.md` §2.4); this is the only allowed direct push to `main`.
+# Until the operator applies that branch-protection setting in the GitHub UI, this workflow
+# will fail at the push step with `refusing to update protected branch`.
+#
+# Rollback: see `docs/release-rollback.md`. Either re-dispatch this workflow against an
+# earlier `main` tip OR fast-track a manual revert PR. Both paths produce a NEW tag —
+# never a moved tag, never a force-push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to release (default: main). Pass a SHA to release from an explicit commit."
+        required: false
+        default: "main"
+        type: string
+      force-bump:
+        description: "Override the auto-computed semver bump."
+        required: false
+        type: choice
+        options:
+          - "(auto)"
+          - "patch"
+          - "minor"
+          - "major"
+        default: "(auto)"
+      dry-run:
+        description: "Compute the next version + diff but DO NOT commit or push."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  # The job uses an App installation token for push/tag/release. The workflow's own
+  # GITHUB_TOKEN only needs `contents: read` for the checkout step.
+  contents: read
+
+concurrency:
+  # Only one release at a time — overlapping runs would race on the tag namespace.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Compile, commit, tag, and publish a release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout target ref with full history (needed for `git describe`)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          # Use a default GITHUB_TOKEN here; we'll swap to the App token before any push.
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml==6.0.3 jsonschema==4.25.1
+
+      - name: Compute next semver tag
+        id: bump
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.force-bump }}" != "(auto)" ]]; then
+            next_version=$(python tools/compute_semver_bump.py \
+              --force-bump "${{ inputs.force-bump }}" --print-rationale)
+          else
+            next_version=$(python tools/compute_semver_bump.py --print-rationale)
+          fi
+          previous_tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          echo "next_version=${next_version}" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Release version::${previous_tag:-<initial>} → ${next_version}"
+
+      - name: Regenerate dist/ via `python -m compiler --all-stacks --target all`
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Wipe the entire dist/stacks/ subtree so removed rules don't linger.
+          # We keep dist/README.md and dist/CHANGELOG.md transiently — the generators
+          # below overwrite them on the next step. dist/.gitkeep files (if any) are
+          # regenerated by the compiler.
+          if [[ -d dist/stacks ]]; then
+            rm -rf dist/stacks
+          fi
+          python -m compiler --all-stacks --target all --out dist/
+
+      - name: Regenerate dist/CHANGELOG.md
+        run: |
+          set -euo pipefail
+          prev="${{ steps.bump.outputs.previous_tag }}"
+          if [[ -z "$prev" ]]; then
+            prev="none"
+          fi
+          python tools/generate_changelog.py \
+            --new-version "${{ steps.bump.outputs.next_version }}" \
+            --previous-tag "$prev"
+
+      - name: Regenerate dist/README.md
+        run: |
+          python tools/generate_dist_readme.py --version "${{ steps.bump.outputs.next_version }}"
+
+      - name: Mint an installation token for @standards-bot
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.STANDARDS_BOT_APP_ID }}
+          private-key: ${{ secrets.STANDARDS_BOT_PRIVATE_KEY }}
+
+      - name: Configure git as standards-bot
+        run: |
+          git config user.name "standards-bot[bot]"
+          git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+
+      - name: Verify only dist/ paths changed (defense-in-depth)
+        # The release workflow should ONLY modify dist/. If for some reason a compiler
+        # bug leaves traces outside dist/ (e.g., writes to source/ accidentally), refuse
+        # to commit. Without this guard, a bug could silently corrupt source content.
+        run: |
+          set -euo pipefail
+          changed_outside_dist=$(git status --porcelain | awk '{print $2}' | grep -vE '^(dist/|$)' || true)
+          if [[ -n "$changed_outside_dist" ]]; then
+            echo "::error title=Release safety violation::release.yml wants to commit paths outside dist/:"
+            echo "$changed_outside_dist"
+            exit 1
+          fi
+          echo "Only dist/ paths changed — safe to commit."
+
+      - name: Dry-run summary (no commit, no push, no tag)
+        if: ${{ inputs.dry-run == true }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=Dry-run::Skipping commit, tag, push, and Release creation."
+          echo "Computed next version: ${{ steps.bump.outputs.next_version }}"
+          echo ""
+          echo "::group::dist/CHANGELOG.md head"
+          head -40 dist/CHANGELOG.md || true
+          echo "::endgroup::"
+          echo ""
+          echo "::group::dist/README.md head"
+          head -40 dist/README.md || true
+          echo "::endgroup::"
+          echo ""
+          echo "::group::dist/ status"
+          git status --short dist/
+          echo "::endgroup::"
+
+      - name: Commit, tag, and push
+        if: ${{ inputs.dry-run != true }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.next_version }}"
+          previous="${{ steps.bump.outputs.previous_tag }}"
+
+          # Add ONLY dist/ paths (verified above; redundant safety net).
+          git add dist/
+          if git diff --cached --quiet; then
+            echo "No dist/ changes to commit — release is a no-op for this ref."
+            echo "release_committed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "chore(release): regenerate dist for ${version}"
+
+          # Annotated tag (the `-a` form). Message body cites the previous tag.
+          if [[ -n "$previous" ]]; then
+            git tag -a "$version" -m "Release ${version}. Previous tag: ${previous}."
+          else
+            git tag -a "$version" -m "Release ${version}. First release."
+          fi
+
+          # Push commit and tag using the App token. The remote URL is rewritten with the
+          # token; the App identity has `contents: write` on this repo only.
+          remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push "$remote_url" "HEAD:${{ inputs.ref }}"
+          git push "$remote_url" "refs/tags/$version"
+
+      - name: Extract the new CHANGELOG section for the Release body
+        id: release-notes
+        if: ${{ inputs.dry-run != true }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.next_version }}"
+          # Read the just-written section between the new heading and the next ## heading.
+          awk -v ver="$version" '
+            $0 ~ "^## "ver { capture=1; next }
+            capture && /^## v[0-9]/ { exit }
+            capture { print }
+          ' dist/CHANGELOG.md > /tmp/release-notes.md
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            cat /tmp/release-notes.md
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: ${{ inputs.dry-run != true }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.next_version }}"
+          # gh release create reads --notes-file to avoid shell-escape issues with
+          # multi-line release bodies.
+          gh release create "$version" \
+            --title "Engineering Standards $version" \
+            --notes-file /tmp/release-notes.md \
+            --target "${{ inputs.ref }}"
+
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ref | \`${{ inputs.ref }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Previous tag | \`${{ steps.bump.outputs.previous_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Next version | \`${{ steps.bump.outputs.next_version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Force-bump | \`${{ inputs.force-bump }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry-run | \`${{ inputs.dry-run }}\` |" >> "$GITHUB_STEP_SUMMARY"

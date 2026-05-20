@@ -1,0 +1,138 @@
+---
+id: java-spring-repository-findall-pagination-mandate
+title: Mandatory Pageable on All List-Returning Repository Methods
+version: 1.0.0
+status: approved
+scope:
+  language: java
+  framework: spring-boot
+  framework_version: ">=2.7"
+  layers:
+    - repository
+target_tools:
+  cursor: true
+  github_copilot: true
+  claude_skills: true
+  junie: true
+  agents_md: true
+activation:
+  cursor_mode: auto-attach
+  agents_md_priority: high
+dependencies: []
+related_logic_holes: [5]
+archunit_test: testing/archunit/PaginationMandateTest.java
+---
+
+# Mandatory Pageable on All List-Returning Repository Methods
+
+## 1. Context & Architectural Intent
+
+`repository.findAll()` (and any unbounded list query) is a production-killer the moment the
+underlying table grows beyond development scale. It exhausts the JDBC fetch buffer, allocates a
+heap-resident `List` of every row, and — when exposed via a REST controller — serializes the
+entire result set into a single JSON response that overflows the connector's write buffer. Vlad
+Mihalcea's seminal 2024 post is the canonical reference and remains the most-cited piece of
+Spring Data guidance in 2026:
+
+> "API designers should not expose methods that allow fetching entire database tables, as
+> developers will use them even for large datasets. The `findAll()` method is a serious
+> anti-pattern."
+
+AI agents pattern-match `findAll()` from every Spring Data JPA tutorial. It is correct for
+10-row dev databases and catastrophic for 10M-row production tables. This rule bans the shape
+at the repository layer; `pageable-defaults.md` (controller-side) closes the same hole at the
+HTTP boundary.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. No List-Returning Repository Method Without `Pageable`
+
+* **Rule**: A method on a `JpaRepository`, `CrudRepository`, or custom `@Repository` interface
+  that returns `List<T>`, `Iterable<T>`, `Stream<T>`, `Set<T>`, or `Collection<T>` MUST accept
+  a `Pageable` argument and MUST be re-typed to return `Page<T>` or `Slice<T>`. The lone
+  exception is a method that loads a bounded lookup table (e.g.,
+  `findAllCurrencyCodes()` returning ~180 rows); such methods MUST carry the
+  `@SuppressWarnings("PaginationMandate")` annotation AND a code comment naming the table's
+  bounded nature.
+* **Rationale**: An unbounded list query is a latent OOM and a latent serialization-buffer
+  overflow. The `Pageable` contract pushes the bound up to the caller, where it is
+  reviewable.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN
+  public interface OrderRepository extends JpaRepository<Order, Long> {
+      List<Order> findByCustomerId(Long customerId);   // unbounded
+      List<Order> findAll();                            // unbounded (inherited)
+  }
+
+  // ✅ CORRECT
+  public interface OrderRepository extends JpaRepository<Order, Long> {
+      Page<Order> findByCustomerId(Long customerId, Pageable pageable);
+      Page<Order> findAll(Pageable pageable);   // shadows the inherited method
+  }
+
+  // ✅ CORRECT — bounded lookup table, audited exception
+  public interface CurrencyRepository extends JpaRepository<Currency, String> {
+      @SuppressWarnings("PaginationMandate")
+      // ~180 ISO 4217 codes; bounded by spec.
+      List<Currency> findAll();
+  }
+  ```
+
+### 2.2. Custom JPQL Queries Returning Lists MUST Accept `Pageable`
+
+* **Rule**: A method annotated `@Query` that returns a list-typed result MUST also accept a
+  `Pageable` parameter, and the JPQL MUST be written so that Spring's `Pageable` translation
+  can apply OFFSET / LIMIT correctly. JPQL that uses `JOIN FETCH` on a `*ToMany` association
+  MUST be rewritten to use `@EntityGraph` (per `entity-graph-strategy.md`) so pagination is not
+  defeated by in-memory deduplication.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — JOIN FETCH defeats Pageable
+  @Query("""
+      SELECT o FROM Order o
+      JOIN FETCH o.lines
+      WHERE o.status = :status
+      """)
+  Page<Order> findByStatus(@Param("status") OrderStatus status, Pageable pageable);
+
+  // ✅ CORRECT — @EntityGraph composes with Pageable
+  @EntityGraph(attributePaths = {"lines"})
+  Page<Order> findByStatus(OrderStatus status, Pageable pageable);
+  ```
+
+### 2.3. `Stream<T>` Return Types Are Forbidden Unless Backed by `@QueryHints` Cursor
+
+* **Rule**: A repository method MUST NOT return `Stream<T>` unless it is annotated with
+  `@QueryHints` configuring a JDBC fetch size AND the caller wraps the result in
+  `try-with-resources`. Naive `Stream<T>` returns load the entire result set into memory
+  before yielding the first element — defeating the streaming intent.
+* **Rationale**: Spring Data's default `Stream<T>` materialization is eager (the JDBC driver
+  loads everything into the in-process ResultSet). The fetch-size hint switches to cursor mode;
+  without it, `Stream<T>` is `List<T>` with extra syntax.
+
+### 2.4. Audited Exceptions MUST Cite the Bounded Source
+
+* **Rule**: Every use of `@SuppressWarnings("PaginationMandate")` MUST be accompanied by a
+  one-line comment explaining the table's bound (e.g., `// ISO 4217: ~180 codes; bounded by
+  spec`). The comment is the reviewer's hook to verify the bound is real and stable.
+* **Rationale**: Without the comment, the suppression decays into "we silenced the lint" —
+  invisible to future readers. The comment makes the bound auditable.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/repository/**/*.java`,
+`**/dao/**/*.java`, or `**/persistence/**/*.java`:
+
+1. **When the user asks for a "list all X" repository method, generate `Page<X> findAllByY(Y y,
+   Pageable pageable)` and explain the OOM risk of unbounded list queries** even if the user's
+   prompt did not mention pagination.
+2. **When refactoring a `List<T>` repository method, propose the `Page<T>` + `Pageable`
+   signature.** Surface a one-line PR comment about Vlad Mihalcea's anti-pattern reference.
+3. **When a `@Query` method uses `JOIN FETCH` on a `*ToMany` association AND returns
+   `Page<T>`, replace with `@EntityGraph`.** Flag the HHH000104 risk.
+4. **When the user explicitly requests `findAll()` without pagination, push back.** Accept it
+   only when the user names a bounded lookup table AND the code carries
+   `@SuppressWarnings("PaginationMandate")` + the bound-citing comment.

@@ -1,0 +1,122 @@
+---
+description: "Clean Architecture Layer Boundaries and Dependency Inversion — apply to Spring Boot 2.7 (legacy)"
+alwaysApply: true
+---
+
+# Clean Architecture Layer Boundaries and Dependency Inversion
+
+## 1. Context & Architectural Intent
+
+The organization runs every service on a four-layer Clean Architecture variant:
+**Controller → Service → Repository → Domain**, with dependencies pointing inward
+(Controllers know Services, Services know Repositories and Domain, Repositories know Domain;
+Domain knows nothing). The layer boundaries are the contract that makes the codebase
+reviewable at scale: a reader can predict where any responsibility lives, and a refactor in
+one layer cannot cascade into another.
+
+AI agents trained on tutorial-grade code routinely collapse these layers:
+
+- Controllers call repositories directly (skipping the service).
+- Services return entities (collapsing service and persistence concerns).
+- Repositories contain business logic (validation, derived-field computation).
+- Domain classes import Spring annotations (binding the domain to the framework).
+
+Each collapse looks small in isolation; together they erode the architectural rationale.
+This rule is the cross-cutting baseline that every other rule depends on — it defines the
+"controller", "service", "repository" layer semantics that the layer-keyed source split
+(ADR-0002) encodes.
+
+This rule uses `cursor_mode: always` because layer-boundary discipline applies to every
+file in every Spring Boot service, and `agents_md_priority: high` because it is the most
+load-bearing rule in the corpus.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. Dependencies Point Inward — Domain Imports Nothing From Outer Layers
+
+* **Rule**: Classes in the domain layer (`<basePkg>/domain/`) MUST NOT import any class from
+  the controller, service, repository, web, persistence, or infrastructure layers. Domain
+  imports are limited to other domain types, JDK standard library, and
+  framework-independent constraint annotations (e.g., `jakarta.validation.constraints.*`).
+* **Rationale**: The domain is the invariant core. It must be independent of the persistence
+  technology, the HTTP framework, and the messaging system. Domain code that imports
+  `@Entity`, `@RestController`, or `org.springframework.*` is no longer portable across those
+  layers' replacements.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — domain bound to Spring + JPA
+  package com.acme.payments.domain;
+  import org.springframework.stereotype.Service;
+  import jakarta.persistence.Entity;
+
+  @Entity
+  public class Order {
+      // mixed: domain + persistence in one type
+  }
+
+  // ✅ CORRECT — pure domain type
+  package com.acme.payments.domain;
+
+  public final class Order {
+      private final OrderId id;
+      private final CustomerId customerId;
+      private final Money total;
+      // ... pure constructors, behavior, invariants
+  }
+
+  // Persistence is a separate type in the persistence layer:
+  package com.acme.payments.persistence;
+
+  @Entity(name = "Order")
+  class OrderEntity {
+      @Id Long id;
+      // ... + a toDomain() / fromDomain() boundary mapper
+  }
+  ```
+
+### 2.2. Controllers Depend on Services, Never on Repositories
+
+* **Rule**: Controllers (`<basePkg>/controller/`, `<basePkg>/web/`, `<basePkg>/rest/`) MUST
+  NOT inject `Repository` types or call repository methods directly. Every data access from
+  a controller goes through a service.
+* **Rationale**: A controller that calls a repository directly skips the service layer's
+  responsibility for transaction boundaries (see `transactional-readonly.md`), business-rule
+  enforcement, and cross-cutting concerns (authorization, audit logging). It also blurs
+  the boundary the layer-keyed source split (ADR-0002) relies on.
+
+### 2.3. Services Depend on Repositories and Domain, Never on Controllers
+
+* **Rule**: Services (`<basePkg>/service/`, `<basePkg>/usecase/`) MUST NOT inject controller
+  types, `HttpServletRequest`, `HttpServletResponse`, or any framework type from the web
+  layer. Services accept domain types or request DTOs and return domain types or response
+  DTOs.
+* **Rationale**: Service code that reads from `HttpServletRequest` is no longer reusable
+  outside the HTTP context (e.g., from a `@Scheduled` job or a message-broker listener).
+
+### 2.4. Repositories Contain Persistence Logic Only
+
+* **Rule**: Repositories (`<basePkg>/repository/`, `<basePkg>/dao/`, `<basePkg>/persistence/`)
+  MUST contain only data-access logic. They MUST NOT contain business-rule validation,
+  derived-field computation, or cross-aggregate orchestration. Such logic belongs in the
+  service or the domain.
+* **Rationale**: A repository that validates business rules cannot be replaced (e.g., from
+  JPA to a `@DataJdbcRepository` or a `WebClient`-backed remote source) without porting the
+  business rules with it. Persistence-layer-only code is replaceable.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java (or TypeScript, Python) code anywhere in the
+project:
+
+1. **Place new types in the layer their responsibility names.** A new "validate and persist
+   the order" responsibility goes in the service layer; a new "execute SQL" responsibility
+   goes in the repository layer; a new pure value object goes in the domain layer.
+2. **Reject controllers that inject a `Repository`.** Insert a service layer (or use an
+   existing one) and route the call through it.
+3. **Reject services that import controller types or `HttpServletRequest`.** Refactor to
+   accept the data as a request DTO parameter.
+4. **Reject domain types that import Spring or JPA annotations.** Split into a domain type
+   (pure) and a persistence type (annotated), with explicit boundary mappers.
+5. **Reject repositories that contain `if/else` business rules.** Move the rules to the
+   service or domain.

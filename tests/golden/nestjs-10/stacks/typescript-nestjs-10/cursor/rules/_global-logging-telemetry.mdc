@@ -1,0 +1,157 @@
+---
+description: "Logging and Telemetry — Structured JSON, Trace Context, Redaction — apply to NestJS 10"
+alwaysApply: true
+---
+
+# Logging and Telemetry — Structured JSON, Trace Context, Redaction
+
+## 1. Context & Architectural Intent
+
+Logs are the primary debugging surface in production. AI-generated code routinely produces
+log output that is unusable in aggregation: unstructured strings, missing trace context,
+leaked credentials, and verbosity that defeats sampling. This rule mandates the four
+production-grade log discipline pillars: (a) JSON-structured output, (b) trace-context
+propagation (OpenTelemetry / W3C Trace Context), (c) sensitive-field redaction, (d)
+appropriate level discipline. It applies to every service in every language.
+
+The rule is `cursor_mode: always` because logging applies to every file, and `dependencies:
+[global-security-baselines]` because the redaction rule (§2.3) extends the security
+baseline's "no secrets, no PII" mandate to the log path specifically.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. All Application Logs Are JSON-Structured
+
+* **Rule**: Application logs MUST be emitted as JSON objects, one object per log event. Every
+  log object MUST carry the canonical fields: `timestamp` (ISO 8601, UTC), `level` (`DEBUG` |
+  `INFO` | `WARN` | `ERROR`), `logger` (the source class FQN or module path), `message` (the
+  human-readable event), `traceId` (W3C trace-id), `spanId` (W3C span-id), and `service`
+  (the service name from `spring.application.name` or equivalent). Additional structured
+  fields use snake_case keys (`order_id`, `user_id`, `latency_ms`).
+* **Rationale**: Unstructured logs are not queryable at scale. The JSON shape is the
+  contract that allows the org's log aggregator (Datadog, Splunk, ELK) to index every field
+  and surface dashboards / alerts. The trace-id field is the join key between logs and
+  distributed traces.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — unstructured, no context
+  log.info("Created order " + order.id() + " for customer " + customerId + " total=" + total);
+
+  // ✅ CORRECT — structured, with kv pairs
+  log.atInfo()
+      .setMessage("order.created")
+      .addKeyValue("order_id", order.id())
+      .addKeyValue("customer_id", customerId)
+      .addKeyValue("total_cents", total.toCents())
+      .log();
+
+  // ✅ CORRECT — SLF4J 1.x with Markers / Structured Arguments
+  log.info("order.created order_id={} customer_id={} total_cents={}",
+      order.id(), customerId, total.toCents());
+  ```
+
+  Configure the JSON encoder in `logback-spring.xml`:
+
+  ```xml
+  <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <includeMdcKeyName>traceId</includeMdcKeyName>
+      <includeMdcKeyName>spanId</includeMdcKeyName>
+  </encoder>
+  ```
+
+### 2.2. Trace Context MUST Propagate via OpenTelemetry / W3C Trace Context
+
+* **Rule**: Every incoming HTTP request MUST be observed by the OpenTelemetry Spring Boot
+  starter (or `spring-boot-starter-actuator` with Micrometer Tracing), which propagates W3C
+  `traceparent` / `tracestate` headers. Every outbound HTTP / gRPC / message-broker call MUST
+  forward the trace context. The `traceId` and `spanId` MUST be injected into the SLF4J MDC
+  for every log event in the request's processing.
+* **Rationale**: Distributed systems' debugging hinges on the ability to follow a request
+  across services. The trace-id in logs is the join key; the propagated header is the
+  cross-service stitch. Both are required.
+* **Implementation Requirement**:
+
+  ```yaml
+  # ✅ CORRECT — OpenTelemetry auto-instrumentation
+  management:
+    tracing:
+      sampling:
+        probability: 0.1   # production: 10%; staging/dev: 1.0
+    otlp:
+      tracing:
+        endpoint: http://otel-collector:4318/v1/traces
+  ```
+
+### 2.3. Sensitive Fields MUST Be Redacted Before Logging
+
+* **Rule**: Field values from `password`, `token`, `secret`, `apiKey`, `creditCard`, `ssn`,
+  `dob`, `authorization`, and any field annotated `@Sensitive` MUST be replaced with the
+  literal string `"[REDACTED]"` before being emitted to any log appender. The redaction
+  MUST happen at the log-event-construction site, NOT in the appender (so the original
+  value never reaches a buffer that could be flushed elsewhere).
+* **Rationale**: A single leaked credential in a log line is a credential to rotate
+  everywhere — across every log store and retention window. Redaction at construction site
+  ensures the value never enters the appender pipeline.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — full request body logged; password leaks
+  log.info("login attempt body={}", loginRequest);
+
+  // ✅ CORRECT — explicit, redacted projection
+  log.atInfo()
+      .setMessage("login.attempt")
+      .addKeyValue("email", loginRequest.email())
+      .addKeyValue("password", "[REDACTED]")
+      .log();
+
+  // ✅ CORRECT — record implements a redact() method
+  public record LoginRequest(String email, String password) {
+      public LoginRequest redact() {
+          return new LoginRequest(email, "[REDACTED]");
+      }
+      @Override public String toString() { return redact().toString(); }
+  }
+  ```
+
+### 2.4. Log Levels Are Discipline, Not Decoration
+
+* **Rule**: Log levels MUST follow this semantics:
+  - `ERROR` — an operator must look at this; an automated alert may fire.
+  - `WARN` — recoverable abnormality (retries succeeded, fallback engaged); operator MAY
+    investigate.
+  - `INFO` — coarse-grained business events (request received, order created); always-on
+    in production.
+  - `DEBUG` — fine-grained development context; OFF in production.
+  - `TRACE` — extremely verbose; only enabled for short, targeted debugging windows.
+* **Rationale**: Log levels are the operator's coarse filter. `ERROR` that fires on
+  recoverable conditions trains operators to ignore alerts. `INFO` on every method entry/exit
+  defeats sampling and inflates ingestion cost. Discipline keeps the surface useful.
+
+### 2.5. Exception Logging MUST Include the Throwable as a Last Argument
+
+* **Rule**: When a log event accompanies an exception, the `Throwable` MUST be passed as the
+  last argument (SLF4J `log.error("msg", throwable)`), NOT stringified into the message
+  (`log.error("msg: " + e.getMessage())`). The structured emitter then attaches the full
+  stack trace as a dedicated field.
+* **Rationale**: `e.getMessage()` loses the stack trace and the cause chain. The structured
+  emitter's `exception` field captures both, queryable independently from the message.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring code that contains log statements:
+
+1. **Default to structured logging with key-value pairs** — never concatenate values into the
+   message string.
+2. **When logging an exception, pass the `Throwable` as the last argument.** Do not call
+   `e.getMessage()` and concatenate.
+3. **Never log full request or response bodies.** Emit a redacted projection (field-by-field)
+   or a record's `redact()` method.
+4. **When emitting a log statement, verify trace-context propagation is wired** (Micrometer
+   Tracing or OpenTelemetry starter). If absent, propose adding the starter in the same
+   change.
+5. **Reject `log.error` on recoverable conditions.** Use `WARN` for fallback paths; reserve
+   `ERROR` for "operator must look."
+6. **Reject `log.info` on every method entry/exit.** Such verbosity defeats sampling and
+   bloats cost.

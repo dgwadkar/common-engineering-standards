@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering-standards.example.com/schemas/layer-glob-map.json",
+
+  "$comment": "Layer-to-Glob mapping table — the canonical translation from `scope.language` + `scope.layers[]` (per `source-rule.schema.json`) into the file-pattern `globs` array that the Phase-4 Cursor MDC transformer emits. KEYS: each top-level key (excluding `$schema`, `$id`, `$comment`) is a language identifier; each second-level key is a layer identifier; each value is an array of glob patterns. SEMANTICS: an empty array on the `architecture` layer is a sentinel meaning `the compiler routes this rule to alwaysApply:true` (architecture rules cross-cut every file). An empty array on any OTHER layer means `no idiomatic file pattern is defined for this layer in this language`; the compiler falls back to the language's `all` glob. EXTENSION POLICY: the Phase 2 baseline reproduces `docs/02-implementation-plan.md` §5 task 2 verbatim (Java fully specified there; TypeScript and Python as a sample). Phase 3 / Phase 5 / Phase 8 may extend this file with additional layers, languages, or globs subject to Standards-Architect approval per `.github/CODEOWNERS`. The `_global` pseudo-language is NOT present here because cross-cutting rules under `source/_global/` use `activation.cursor_mode: always` and never need glob resolution.",
+
+  "java": {
+    "$comment_layers": {
+      "controller":     "REST/web controllers — Spring MVC `@RestController`, `@Controller`, and the conventional `controller/`, `web/`, `rest/` packages. Used by Logic Hole #3 (validation + DTO records) and the controller half of Logic Hole #5 (pagination defaults).",
+      "service":        "Service-layer beans — `@Service`-annotated classes and the conventional `service/`, `usecase/` packages. Used by Logic Hole #4 (transactional discipline + self-invocation).",
+      "repository":     "Spring Data repositories and JDBC-direct DAOs — `@Repository` and the conventional `repository/`, `dao/`, `persistence/` packages. Used by Logic Hole #4 (N+1 prevention, entity graph strategy) and the repository half of Logic Hole #5 (no naked findAll).",
+      "config":         "Java `@Configuration` classes plus the Spring Boot `application*.yml`/`.properties` family. Used by config-only rules such as `disable-open-session-in-view` and actuator security.",
+      "test":           "JUnit test classes — file-name-based detection (`*Test.java`, `*Tests.java`, `*IT.java` for integration tests). Distinct from the source-tree `testing/` directory which is the AUTHORING layer for testing rules.",
+      "di":             "Dependency-injection rules apply broadly — every Java file may contain a Spring-managed bean. Logic Hole #6 (constructor injection mandate) uses this layer; the resulting MDC is `agent-requested` mode so it does not always-attach.",
+      "error-handling": "Exception/advice/error packages. Used by the existing baseline rules (prohibit-generic-runtime, prohibit-blind-catch) plus the unified-api-error rule.",
+      "architecture":   "Empty by design — sentinel for the compiler. Architecture rules cross-cut every file and emit MDC with `alwaysApply: true`, no globs.",
+      "all":            "Catch-all — every Java source. Used when a rule applies to any Java code regardless of layer (rare; agent-requested mode is usually a better fit)."
+    },
+    "controller":     ["**/controller/**/*.java", "**/web/**/*.java", "**/rest/**/*.java"],
+    "service":        ["**/service/**/*.java", "**/usecase/**/*.java"],
+    "repository":     ["**/repository/**/*.java", "**/dao/**/*.java", "**/persistence/**/*.java"],
+    "config":         ["**/config/**/*.java", "src/main/resources/application*.yml", "src/main/resources/application*.properties"],
+    "test":           ["**/*Test.java", "**/*IT.java", "**/*Tests.java"],
+    "di":             ["**/*.java"],
+    "error-handling": ["**/exception/**/*.java", "**/advice/**/*.java", "**/errors/**/*.java"],
+    "architecture":   [],
+    "all":            ["**/*.java"]
+  },
+
+  "typescript": {
+    "$comment_layers": {
+      "controller": "NestJS-style controllers — file-name suffix `.controller.ts` is the dominant idiom (the framework's CLI scaffolds files this way). Phase 3+ may extend this list if other TypeScript frameworks (e.g., Express, Hono) become first-class.",
+      "service":    "NestJS-style services — file-name suffix `.service.ts`.",
+      "all":        "Catch-all — every TypeScript and TSX source. Phase 3+ will extend this map with `repository`, `config`, `test`, `di`, `error-handling`, and `architecture` entries as TypeScript Logic Holes are added; the current Phase 2 baseline reproduces `docs/02-implementation-plan.md` §5 task 2 verbatim."
+    },
+    "controller": ["**/*.controller.ts"],
+    "service":    ["**/*.service.ts"],
+    "all":        ["**/*.ts", "**/*.tsx"]
+  },
+
+  "python": {
+    "$comment_layers": {
+      "controller": "FastAPI router modules — the convention is a top-level `routers/` package OR an `api/` package; both are matched.",
+      "service":    "FastAPI service modules — the convention is a `services/` package.",
+      "all":        "Catch-all — every Python source. Phase 3+ will extend this map with `repository`, `config`, `test`, and other layers as Python Logic Holes are added; the current Phase 2 baseline reproduces `docs/02-implementation-plan.md` §5 task 2 verbatim."
+    },
+    "controller": ["**/routers/**/*.py", "**/api/**/*.py"],
+    "service":    ["**/services/**/*.py"],
+    "all":        ["**/*.py"]
+  }
+}

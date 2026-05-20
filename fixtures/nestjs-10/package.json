@@ -1,0 +1,27 @@
+{
+  "_phase6_provenance_": "Phase-6 fixture consumer manifest (docs/02-implementation-plan.md §9 task 1). Pins typescript-nestjs-10 stack (NestJS 10.x).",
+  "name": "nestjs-10-fixture",
+  "version": "0.0.1",
+  "description": "Phase-6 stack fixture: pins typescript-nestjs-10 (NestJS 10.x).",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/platform-express": "^10.3.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.0",
+    "reflect-metadata": "^0.2.0",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.3.0",
+    "@nestjs/testing": "^10.3.0",
+    "@types/node": "^20.10.0",
+    "jest": "^29.7.0",
+    "typescript": "^5.3.0"
+  }
+}

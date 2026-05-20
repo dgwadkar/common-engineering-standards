@@ -1,0 +1,44 @@
+# Stack descriptor for source/python/fastapi/
+# Consumed by `compiler/transformers/memory_bank_scaffold.py`. See
+# source/java/spring-boot/_meta.yml for the schema (loose by design).
+
+framework_name: FastAPI
+framework_id: fastapi
+language: python
+language_runtime: "Python 3.12"
+
+stack_versions:
+  python-fastapi-0-110:
+    framework_version: "0.110.0"
+    description: "FastAPI 0.110.x line."
+
+required_dependencies:
+  - "fastapi"
+  - "pydantic>=2.0"
+  - "uvicorn[standard]"
+
+optional_dependencies:
+  - "sqlalchemy[asyncio] (when using SQLAlchemy)"
+  - "alembic (for migrations)"
+  - "httpx (for outbound HTTP calls)"
+
+required_env_vars:
+  - name: "ENV"
+    description: "Environment tag (dev/staging/prod)."
+  - name: "DATABASE_URL"
+    description: "Database URL for the application datasource."
+
+architecture_diagram: |
+  ```mermaid
+  flowchart TD
+    Client[HTTP client] --> Router
+    Router -->|Pydantic model| Service
+    Service --> Repository
+    Repository --> Database[(Database)]
+    Service --> Domain[Domain dataclasses]
+  ```
+
+layer_boundaries:
+  - "Routers (routers/, api/) depend only on services."
+  - "Services own business logic and remain testable without FastAPI imports."
+  - "Repositories handle persistence only."

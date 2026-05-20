@@ -1,0 +1,156 @@
+---
+id: java-spring-controller-dto-record-mandate
+title: Mandatory Request and Response Record Types at the Controller Boundary
+version: 1.0.0
+status: approved
+scope:
+  language: java
+  framework: spring-boot
+  framework_version: ">=3.0"
+  layers:
+    - controller
+target_tools:
+  cursor: true
+  github_copilot: true
+  claude_skills: true
+  junie: true
+  agents_md: true
+activation:
+  cursor_mode: auto-attach
+  agents_md_priority: high
+dependencies:
+  - java-spring-controller-validation-boundaries
+  - global-security-baselines
+related_logic_holes: [3]
+archunit_test: testing/archunit/DtoRecordMandateTest.java
+---
+
+# Mandatory Request and Response Record Types at the Controller Boundary
+
+## 1. Context & Architectural Intent
+
+The controller layer carries two distinct concerns that AI agents routinely conflate:
+
+1. **Persistence shape** — the JPA `@Entity` that the database row maps to.
+2. **API contract shape** — what the HTTP client sends in and receives back.
+
+LLM training data is dominated by tutorial examples where Entity == DTO == Response. AI has no
+signal that this collapse creates two production-critical defects: (a) **mass-assignment
+vulnerability** (OWASP API3:2023) when the controller binds an inbound payload directly to an
+entity — an attacker POSTs `{"role":"ADMIN","accountBalance":99999}` and Hibernate happily
+persists the fields; (b) **information disclosure + lazy-loading storms** when the controller
+returns an entity directly — Jackson traverses `@OneToMany` collections during serialization,
+leaking internal columns AND triggering the N+1 covered in `n-plus-one-prevention.md` *during
+the HTTP response phase*.
+
+This rule mandates request and response `record` types at every controller boundary. Records
+make the API contract self-documenting, immutable, and explicitly whitelisted to the fields the
+API is willing to expose. It is the output-side complement to `validation-boundaries.md`.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. Request Body Parameters MUST Be `record` Types, Never `@Entity`
+
+* **Rule**: A controller method parameter annotated `@RequestBody`, `@RequestPart`, or
+  `@ModelAttribute` MUST be a Java `record` (or an immutable POJO in legacy projects). The
+  parameter type MUST NOT carry `@Entity`, `@Embeddable`, or `@MappedSuperclass`.
+* **Rationale**: Binding the body directly to an entity is the canonical mass-assignment
+  vulnerability. The attacker controls which fields are populated; Hibernate's dirty-checking
+  persists them at the next `save()`. Records additionally encode immutability and let the
+  reader verify the contract with no class-body inspection.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — entity binding
+  @PostMapping("/users")
+  public User create(@RequestBody User user) {   // attacker sets role=ADMIN, balance=99999
+      return userRepository.save(user);
+  }
+
+  // ✅ CORRECT — explicit request record with whitelisted fields
+  public record UserCreateRequest(
+      @NotBlank @Email String email,
+      @NotBlank @Size(min = 8, max = 72) String password,
+      @NotBlank @Size(max = 100) String displayName
+  ) {}
+
+  @PostMapping("/users")
+  public UserResponse create(@Valid @RequestBody UserCreateRequest req) {
+      User saved = userService.create(req);
+      return UserResponse.from(saved);
+  }
+  ```
+
+### 2.2. Response Bodies MUST Be `record` Types, Never `@Entity`, Never `Page<Entity>`
+
+* **Rule**: A controller method's return type MUST be a Java `record`, a `ResponseEntity<Record>`,
+  or a `Page<Record>` / `Slice<Record>`. The return type MUST NOT be an `@Entity`, a
+  `List<Entity>`, a `Page<Entity>`, or any type whose Jackson serialization could traverse
+  persistence-managed lazy associations.
+* **Rationale**: Returning entities (a) leaks audit / internal / sensitive fields
+  (`passwordHash`, `lastLoginIp`, `createdBy`, soft-delete flags), (b) couples the API contract
+  to the database schema (a column rename breaks every public client), and (c) triggers
+  lazy-loading during JSON serialization, holding the DB connection for the entire response
+  window (see `n-plus-one-prevention.md` and the Open-Session-in-View rule).
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — entity exposure on output
+  @GetMapping("/users/{id}")
+  public User get(@PathVariable Long id) {
+      return userRepository.findById(id).orElseThrow();   // passwordHash leaks; lazy fields trigger N+1
+  }
+
+  // ✅ CORRECT — record-typed response with explicit factory
+  public record UserResponse(
+      Long id,
+      String email,
+      String displayName,
+      Instant createdAt
+  ) {
+      public static UserResponse from(User u) {
+          return new UserResponse(u.getId(), u.getEmail(), u.getDisplayName(), u.getCreatedAt());
+      }
+  }
+
+  @GetMapping("/users/{id}")
+  public UserResponse get(@PathVariable Long id) {
+      return UserResponse.from(userService.findById(id));
+  }
+  ```
+
+### 2.3. Records MUST Provide a Static `from(Entity)` Factory
+
+* **Rule**: Every response record that wraps a single entity MUST expose a static `from(<Entity>)`
+  factory method. Records that wrap a collection MUST expose `fromAll(List<Entity>)` (or accept
+  `Page<Entity>::map(SomeRecord::from)` in the controller). The factory is the only legal site
+  to read entity fields into the API contract; controllers and services MUST NOT construct the
+  record via the canonical constructor with inline field projections.
+* **Rationale**: A single factory site is the maintenance fulcrum: when the entity gains or
+  renames a field, the API surface change is one edit in one place. Inline projections scatter
+  the contract across every call site and create per-endpoint drift.
+
+### 2.4. Request and Response Records Live in a Dedicated `dto/` Sub-package
+
+* **Rule**: Request and response records MUST live in `<basePkg>/controller/dto/` (or the
+  conventional `<basePkg>/api/dto/`). They MUST NOT live in `<basePkg>/domain/`,
+  `<basePkg>/entity/`, or `<basePkg>/persistence/`.
+* **Rationale**: Package placement encodes the boundary discipline. A DTO under `domain/`
+  invites reuse as a domain type; the boundary blurs; an entity reference creeps in.
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/controller/**/*.java`,
+`**/web/**/*.java`, or `**/rest/**/*.java`:
+
+1. **If a controller parameter type is annotated `@Entity`, REPLACE it with a request record**
+   whose fields are explicitly whitelisted. Explain the OWASP API3:2023 mass-assignment risk in
+   the PR description.
+2. **If a controller return type is `@Entity`, `Page<@Entity>`, or `List<@Entity>`, REPLACE it
+   with a record (or `Page<Record>`).** Provide a static `from(<Entity>)` factory.
+3. **Never construct a response record via inline field-by-field projection at the call site.**
+   Always go through the `from(...)` factory.
+4. **Place new request/response records in `controller/dto/` (or `api/dto/`).** Push back if
+   the user suggests `domain/` or `entity/`.
+5. **Never auto-bind a request body directly to an entity**, even when the user explicitly
+   requests it. Explain the security risk and propose the record-based alternative.

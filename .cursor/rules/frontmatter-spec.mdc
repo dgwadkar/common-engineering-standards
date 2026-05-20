@@ -1,0 +1,146 @@
+---
+description: Frontmatter contract for source rules under source/**/*.md — required fields, allowed enums, schema reference for the Phase 2 JSON Schema validator.
+globs: ["source/**/*.md"]
+alwaysApply: false
+---
+
+# Source-Rule Frontmatter Specification
+
+Authoritative references (both ship as of Phase 2):
+
+- **Prose**: `docs/01-architecture-upgrade-report.md` §7.1 (architectural intent + examples).
+- **Machine-readable contract**: `schemas/source-rule.schema.json` (JSON Schema Draft 2020-12;
+  validated on every PR by the `schema-validation` job in `.github/workflows/validate.yml`).
+- **Layer→glob lookup**: `schemas/layer-glob-map.json` (the Phase-4 compiler uses this to derive
+  the MDC `globs` array from `scope.language` + `scope.layers[]`).
+- **Reference example**: `schemas/examples/valid-source-rule.md` (a known-good frontmatter you can
+  copy when starting a new rule).
+
+This rule fires alongside `authoring-style.mdc` whenever a `source/**/*.md` file is edited. It is
+the fast-reference checklist for the YAML frontmatter block at the top of every source rule. The
+JSON Schema is the canonical contract — if this checklist and the schema disagree, the schema wins
+and an issue should be filed to update this file.
+
+## 1. Full Template
+
+Paste this at the top of any new rule and fill in the placeholders.
+
+```yaml
+---
+id: <unique-kebab-case-string>           # required, e.g., java-spring-controller-validation-boundaries
+title: <human-readable-title>            # required, sentence case
+version: <semver>                        # required, e.g., 1.0.0
+status: draft | approved | deprecated    # required
+scope:
+  language: <lang-id>                    # required: java | typescript | python | go | rust | ...
+  framework: <framework-id> | null       # required (use null for language-core rules under _core/)
+  framework_version: <semver-range>      # optional, e.g., ">=3.0", "^2.7.0"
+  layers:                                # required, array, ≥1 entry
+    - controller | service | repository | config | test | di | error-handling | architecture | all
+target_tools:                            # required, at least one must be true
+  cursor: true | false
+  github_copilot: true | false
+  claude_skills: true | false
+  junie: true | false
+  agents_md: true | false
+activation:                              # required
+  cursor_mode: always | auto-attach | agent-requested | manual
+  agents_md_priority: high | medium | low
+dependencies: [<source-rule-id>, ...]    # optional
+related_logic_holes: [<int>, ...]        # optional, references the catalog in the architecture report
+archunit_test: <path-or-null>            # optional, build-time enforcement test path
+---
+```
+
+## 2. Field-by-Field Rules
+
+### `id`
+- Kebab-case, lowercase, ASCII only.
+- Prefixed with `<lang>-<framework>-<layer>-` for framework-scoped rules
+  (e.g., `java-spring-controller-validation-boundaries`).
+- For `_global/` rules: just `<scope>-<rule>` (e.g., `global-security-baselines`).
+- Must be globally unique across `source/`.
+
+### `title`
+- Human-readable. Sentence case. No trailing period.
+- Must match the H1 heading in the Markdown body.
+
+### `version`
+- Strict semver (`MAJOR.MINOR.PATCH`).
+- Bump rules: editorial fixes → patch; new enforced standard added → minor; breaking change to
+  existing standard (e.g., narrowing scope, changing severity) → major.
+
+### `status`
+- `draft`: under authoring; compiler may emit warnings but does NOT ship to consumers.
+- `approved`: ships to consumers.
+- `deprecated`: still ships with a deprecation note; removed in the next major release.
+
+### `scope.language`
+- Lowercase identifier. The schema enforces the regex shape (`^[a-z][a-z0-9_-]*$` — no leading
+  underscores); the Phase-4 compiler additionally requires the value to be a key in
+  `schemas/layer-glob-map.json` (otherwise glob resolution fails the build).
+- Phase 2 baseline keys: `java`, `typescript`, `python`.
+- For rules under `source/_global/`, use the pseudo-language `global` (NOT `_global` — leading
+  underscores are rejected). `global` rules pair with `framework: null`, `layers: [architecture]`,
+  and `activation.cursor_mode: always`; they bypass glob resolution and are intentionally absent
+  from `schemas/layer-glob-map.json`.
+
+### `scope.framework`
+- Lowercase identifier (e.g., `spring-boot`, `nestjs`, `fastapi`). Use `null` (not the string
+  `"null"`) for language-core rules under `<lang>/_core/`.
+
+### `scope.framework_version`
+- Optional. Semver range (PEP 440-style or npm-style). The compiler uses this to filter rules per
+  stack (e.g., `>=3.0` excludes a rule from the `java-spring-boot-2` stack).
+
+### `scope.layers`
+- Array. At least one entry. Allowed values:
+  `controller`, `service`, `repository`, `config`, `test`, `di`, `error-handling`,
+  `architecture`, `all`.
+- `architecture` is special: the compiler routes it to `alwaysApply: true` because architecture
+  cross-cuts every file.
+
+### `target_tools.*`
+- At least one boolean must be `true`. Otherwise the rule emits nothing and the compiler fails.
+
+### `activation.cursor_mode`
+- `always`: equivalent to `alwaysApply: true`. Reserve for foundational/architectural rules.
+- `auto-attach` (default): glob-resolved from `scope.layers`.
+- `agent-requested`: included only when the agent's task description matches.
+- `manual`: never auto-applied; the human types `@<rule-id>` in chat.
+
+### `activation.agents_md_priority`
+- `high` → included in the ≤150-line universal `AGENTS.md`.
+- `medium` / `low` → not included.
+
+### `dependencies`
+- Array of `id`s (each in kebab-case). The schema enforces the id pattern only; the Phase-4
+  compiler additionally verifies that every referenced id exists under `source/` and that the
+  resulting dependency graph is acyclic (cycles fail the build).
+
+### `related_logic_holes`
+- Integer array. References the Logic Hole catalog in
+  `docs/01-architecture-upgrade-report.md` §4.
+
+### `archunit_test`
+- Repository-relative path. Phase 6 fills these in; until then the file does not have to exist,
+  but if you reference it the path MUST be syntactically valid.
+
+## 3. Common Mistakes
+
+- ❌ Quoting `null` as a string: `framework: "null"` → ✅ `framework: null`
+- ❌ Spaces in `id`: `id: java spring boot validation` → ✅ `id: java-spring-validation`
+- ❌ Title in `id`-format: `id: Java Spring Controller …` → ✅ kebab-case, lowercase
+- ❌ Layer typo: `layers: [controllers]` → ✅ `[controller]` (singular)
+- ❌ `target_tools` all-false: every tool flagged false → at least one MUST be true.
+
+## 4. AI Directives
+
+- When asked to "add frontmatter" to a source rule, USE the template in §1 verbatim and fill placeholders.
+- When asked to "set `alwaysApply: true`", instead set `activation.cursor_mode: always` in the source
+  frontmatter — the compiler derives the MDC field. Source files never contain `alwaysApply:` directly.
+- When asked to "pick a layer", consult the layer-glob mapping in
+  `docs/02-implementation-plan.md` §5 task 2 (the inline `layer-glob-map.json` snippet) and choose
+  the narrowest layer that matches the rule's surface area.
+- When asked to "add a Logic Hole reference", confirm the integer exists in
+  `docs/01-architecture-upgrade-report.md` §4 before writing it into `related_logic_holes`.

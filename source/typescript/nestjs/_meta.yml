@@ -1,0 +1,45 @@
+# Stack descriptor for source/typescript/nestjs/
+# Consumed by `compiler/transformers/memory_bank_scaffold.py`. See
+# source/java/spring-boot/_meta.yml for the schema (loose by design).
+
+framework_name: NestJS
+framework_id: nestjs
+language: typescript
+language_runtime: "Node.js 20 LTS"
+
+stack_versions:
+  typescript-nestjs-10:
+    framework_version: "10.3.0"
+    description: "NestJS 10.x line."
+
+required_dependencies:
+  - "@nestjs/core"
+  - "@nestjs/common"
+  - "@nestjs/platform-express"
+  - "class-validator"
+  - "class-transformer"
+
+optional_dependencies:
+  - "@nestjs/typeorm (when using TypeORM)"
+  - "@nestjs/swagger (for OpenAPI generation)"
+
+required_env_vars:
+  - name: "NODE_ENV"
+    description: "Standard Node runtime mode flag."
+  - name: "PORT"
+    description: "HTTP port."
+
+architecture_diagram: |
+  ```mermaid
+  flowchart TD
+    Client[HTTP client] --> Controller
+    Controller -->|DTO| Service
+    Service --> Repository
+    Repository --> Database[(Database)]
+    Service --> Domain[Domain types]
+  ```
+
+layer_boundaries:
+  - "Controllers (.controller.ts) depend only on services; never inject Repository types."
+  - "Services (.service.ts) own business logic; controllers stay thin."
+  - "Repositories handle persistence only; no business rules."

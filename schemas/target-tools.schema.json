@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering-standards.example.com/schemas/target-tools.schema.json",
+  "title": "Target Tools Catalog",
+  "description": "Canonical catalog of downstream AI-tool targets the compiler emits into the `dist/stacks/<stack>/` tree. This file is both a JSON Schema (it validates the shape of `targets` descriptor objects via the `$defs/TargetDescriptor` sub-schema) AND the live catalog (the 5 canonical descriptors are pinned via `properties.targets.const`). Phase 5 per-tool transformers read this file directly: `json.load(...)['properties']['targets']['const']` returns the canonical list, and each entry tells the transformer what format to emit, where to write it, and how it interacts with source frontmatter flags. Adding a sixth target (e.g., Amazon Q, Windsurf, Codex CLI Memory) is a one-line append to the `const` array PLUS a new transformer module under `compiler/transformers/`.",
+  "$comment": "Phase 2 deliverable per `docs/02-implementation-plan.md` §5 task 3. The catalog reproduces Architecture Upgrade Report §6.4 (Per-Tool Compilation Variants) verbatim. Note: Memory Bank and ArchUnit are NOT included as targets here because they are stack-level scaffolds, not per-rule opt-ins (they are not boolean fields in `source/**/*.md` frontmatter). They are produced by their own dedicated transformers (`memory_bank_scaffold.py`, generated ArchUnit fixtures in Phase 6) keyed off the stack manifest, not off `target_tools.*`.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targets"],
+
+  "properties": {
+    "targets": {
+      "type": "array",
+      "description": "Array of target descriptors. The compiler iterates this list to discover available transformers and their output contracts. Order is significant only for human readability — the compiler keys lookups by `id`, not by index.",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/TargetDescriptor" },
+
+      "const": [
+        {
+          "id": "cursor",
+          "human_name": "Cursor MDC",
+          "format": "mdc",
+          "output_path_template": "stacks/{stack}/cursor/rules/{rule_id}.mdc",
+          "concatenation_mode": "per-rule-file",
+          "source_frontmatter_flag": "target_tools.cursor",
+          "supports_globs": true,
+          "supports_alwaysApply": true,
+          "notes": "Primary distribution target per ADR-0001. Emits one .mdc file per source rule with YAML frontmatter (description, globs, alwaysApply) derived from the source rule's scope.layers and activation.cursor_mode. Cursor reads these natively in 2026 — the legacy .cursorrules format is silently ignored in Agent mode."
+        },
+        {
+          "id": "github_copilot",
+          "human_name": "GitHub Copilot Instructions",
+          "format": "markdown",
+          "output_path_template": "stacks/{stack}/copilot/copilot-instructions.md",
+          "concatenation_mode": "concatenated",
+          "source_frontmatter_flag": "target_tools.github_copilot",
+          "supports_globs": false,
+          "supports_alwaysApply": false,
+          "notes": "Single concatenated Markdown file consumed by GitHub Copilot. The transformer groups source rules by scope.layers and emits an H2 section per layer (## Controller Layer, ## Service Layer, ...). Strips archunit_test and other non-AI-relevant metadata."
+        },
+        {
+          "id": "claude_skills",
+          "human_name": "Claude Code (CLAUDE.md)",
+          "format": "markdown",
+          "output_path_template": "stacks/{stack}/claude/CLAUDE.md",
+          "concatenation_mode": "concatenated",
+          "source_frontmatter_flag": "target_tools.claude_skills",
+          "supports_globs": false,
+          "supports_alwaysApply": false,
+          "notes": "Single root-level CLAUDE.md for Claude Code. Same shape as the Copilot output but uses a more directive tone (explicit 'When generating Java code, you MUST...' framing per Phase 5 task 2)."
+        },
+        {
+          "id": "junie",
+          "human_name": "JetBrains Junie",
+          "format": "markdown-junie",
+          "output_path_template": "stacks/{stack}/junie/AGENTS.md",
+          "concatenation_mode": "concatenated",
+          "source_frontmatter_flag": "target_tools.junie",
+          "supports_globs": false,
+          "supports_alwaysApply": false,
+          "notes": "Numbered-list format mirroring JetBrains/junie-guidelines/guidelines/<lang>/<framework>/guidelines.md. Consumed by the JetBrains Junie agent. Output landing path is .junie/AGENTS.md inside the consumer repo."
+        },
+        {
+          "id": "agents_md",
+          "human_name": "Universal AGENTS.md",
+          "format": "markdown",
+          "output_path_template": "stacks/{stack}/agents-md/AGENTS.md",
+          "concatenation_mode": "concatenated",
+          "source_frontmatter_flag": "target_tools.agents_md",
+          "supports_globs": false,
+          "supports_alwaysApply": false,
+          "notes": "The cross-tool open standard (OpenAI / Linux Foundation, >60K repos as of Q1 2026). Includes ONLY rules with activation.agents_md_priority == 'high'. Hard cap: 150 lines. If the generated output exceeds 150 lines, the Phase 5 transformer fails the build with a 'demote rules to medium priority' diagnostic. The canonical sections are: Tech Stack, Commands, Code Style, Testing, Boundaries."
+        }
+      ]
+    }
+  },
+
+  "$defs": {
+    "TargetDescriptor": {
+      "type": "object",
+      "description": "Shape of a single target-tool descriptor. Adding a new target (Phase 8+) means appending a new object of this shape to `targets.const` PLUS implementing a transformer module under `compiler/transformers/` whose name matches the `id` (with `.py` extension and underscores).",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "human_name",
+        "format",
+        "output_path_template",
+        "concatenation_mode",
+        "source_frontmatter_flag",
+        "supports_globs",
+        "supports_alwaysApply"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable target identifier (snake_case, lowercase). Must match the key the transformer module is named after AND the `target_tools.<id>` boolean in source-rule frontmatter.",
+          "enum": ["cursor", "github_copilot", "claude_skills", "junie", "agents_md"]
+        },
+        "human_name": {
+          "type": "string",
+          "description": "Human-readable name for use in logs and PR descriptions.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "format": {
+          "type": "string",
+          "description": "Output file format. `mdc` = Cursor MDC (YAML frontmatter + Markdown body). `markdown` = plain Markdown without frontmatter. `markdown-junie` = JetBrains Junie's numbered-list convention.",
+          "enum": ["mdc", "markdown", "markdown-junie"]
+        },
+        "output_path_template": {
+          "type": "string",
+          "description": "Path template (Phase-4 transformers expand `{stack}` and `{rule_id}` placeholders). Repository-relative. The `dist/` prefix is added by the compiler driver, NOT by the template.",
+          "pattern": "^stacks/\\{stack\\}/[A-Za-z0-9_./-]+(\\{rule_id\\})?[A-Za-z0-9_./-]*$"
+        },
+        "concatenation_mode": {
+          "type": "string",
+          "description": "`per-rule-file` = each source rule produces one output file (Cursor). `concatenated` = all selected rules are joined into a single output file (Copilot, Claude, Junie, AGENTS.md).",
+          "enum": ["per-rule-file", "concatenated"]
+        },
+        "source_frontmatter_flag": {
+          "type": "string",
+          "description": "The dotted path inside source-rule frontmatter that gates emission. The transformer skips any rule where this boolean is `false`. Always of the form `target_tools.<id>`.",
+          "pattern": "^target_tools\\.[a-z][a-z0-9_]*$"
+        },
+        "supports_globs": {
+          "type": "boolean",
+          "description": "Whether the target file format supports per-file-pattern activation (true only for Cursor MDC)."
+        },
+        "supports_alwaysApply": {
+          "type": "boolean",
+          "description": "Whether the target file format supports an `alwaysApply` style global flag (true only for Cursor MDC)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form prose for transformer authors — quirks, format conventions, downstream-consumer expectations.",
+          "maxLength": 1024
+        }
+      }
+    }
+  }
+}

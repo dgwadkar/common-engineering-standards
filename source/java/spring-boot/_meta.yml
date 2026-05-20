@@ -1,0 +1,72 @@
+# Stack descriptor for source/java/spring-boot/
+#
+# Consumed by `compiler/transformers/memory_bank_scaffold.py` to populate `techContext.md`
+# (versions, dependencies, env vars) and `systemPatterns.md` (layered architecture diagram)
+# for every Spring Boot consumer that opts into the Memory Bank scaffold.
+#
+# Schema is loose by design — this file is read directly by Python YAML, not validated against
+# a JSON Schema. New keys are added as the corpus needs them; consumers ignore unknown keys.
+
+framework_name: Spring Boot
+framework_id: spring-boot
+language: java
+language_runtime: "Java 17 (LTS)"
+
+# Stack versions, mapped to the entries in `compiler/core/stack_filter.py::STACKS`.
+stack_versions:
+  java-spring-boot-3:
+    framework_version: "3.2.0"
+    java_version: "17"
+    description: "Spring Boot 3.x line. Jakarta EE 10 (jakarta.* packages). Spring Framework 6.x."
+  java-spring-boot-2:
+    framework_version: "2.7.18"
+    java_version: "11 or 17"
+    description: "Spring Boot 2.7 LTS. Last release before the jakarta.* migration."
+
+# Required dependencies any consuming service is expected to declare. The compiler does not
+# enforce these; they are documented for the Memory Bank's techContext.md generation.
+required_dependencies:
+  - "org.springframework.boot:spring-boot-starter-web"
+  - "org.springframework.boot:spring-boot-starter-data-jpa"
+  - "org.springframework.boot:spring-boot-starter-validation"
+  - "org.springframework.boot:spring-boot-starter-actuator"
+
+optional_dependencies:
+  - "org.projectlombok:lombok (only if the project elects to use Lombok per the di rule)"
+  - "io.micrometer:micrometer-tracing (for the logging-telemetry rule)"
+  - "org.testcontainers:junit-jupiter (for the testing rule)"
+
+# Required environment variables a consuming service is expected to set in non-dev environments.
+required_env_vars:
+  - name: "SPRING_DATASOURCE_URL"
+    description: "JDBC URL for the primary application datasource."
+  - name: "SPRING_DATASOURCE_USERNAME"
+    description: "Datasource credentials. Production setups MUST source these from a secret manager."
+  - name: "SPRING_DATASOURCE_PASSWORD"
+    description: "Datasource credentials. Never commit literal values."
+  - name: "SPRING_PROFILES_ACTIVE"
+    description: "Comma-separated active profiles (e.g., 'prod,observability')."
+
+# Architecture diagram (Mermaid) emitted into systemPatterns.md.
+architecture_diagram: |
+  ```mermaid
+  flowchart TD
+    Client[HTTP / gRPC client] --> Controller
+    Controller -->|request DTO record| Service
+    Service -->|domain types| Repository
+    Service --> ExternalIO[External I/O\n(payments, queues)]
+    Repository --> Database[(Relational DB)]
+    Service --> Domain[Domain types\n(framework-free)]
+    Repository --> Domain
+    classDef framework fill:#e3f2fd
+    classDef domain fill:#fff3e0
+    class Controller,Service,Repository framework
+    class Domain domain
+  ```
+
+# Boundary discipline (the layered architecture rules), summarized for systemPatterns.md.
+layer_boundaries:
+  - "Controllers depend only on services; never inject Repository types."
+  - "Services depend on repositories and domain types; never on HttpServletRequest or controller types."
+  - "Repositories contain persistence logic only; no business rules."
+  - "Domain types import nothing from controller/service/repository or any framework annotation."

@@ -1,0 +1,127 @@
+# AGENTS.md — `engineering-standards-central`
+
+> **This repository is meta.** Most repositories *consume* engineering standards; this one *authors*
+> them. The instructions below tell any AI agent (Cursor Agent mode, GitHub Copilot, Claude Code,
+> JetBrains Junie, etc.) how to behave when working in this repo, which is **different from how the
+> same agents should behave in a regular product repo**.
+
+---
+
+## 1. Repository Purpose
+
+This repo is the single source of truth for the organization's AI engineering standards. It:
+
+1. Authors rule Markdown under `source/<lang>/<framework>/<layer>/<rule>.md`.
+2. Compiles those source files into a fan of tool-specific distribution artifacts (Cursor `.mdc`,
+   GitHub Copilot, Claude, JetBrains Junie, universal `AGENTS.md`).
+3. Ships the artifacts to consumer repositories via a `dist/` tree that is human-read-only and
+   regenerated only by the release workflow.
+
+Read `docs/02-implementation-plan.md` for the eleven-phase rollout that produces the above.
+
+## 2. The Three Hard Rules
+
+These rules override every other instruction you may have inherited from a generic AGENTS.md
+template or from prior session context.
+
+1. **PRs to `source/` require Standards-Architect approval.** Two-reviewer SLA per
+   `docs/02-implementation-plan.md` §2.3. Never auto-merge a `source/` change.
+
+2. **PRs touching `/dist/` are produced ONLY by the release workflow.** Humans (and AI agents
+   acting on behalf of humans) MUST NOT edit any file under `dist/` except `dist/README.md` during
+   the Phase 1 scaffolding. After Phase 7 the entire tree, including `dist/README.md`, is regenerated
+   by `release.yml` running under the `@standards-bot` GitHub App identity.
+
+3. **The compiler in `compiler/` is the only mechanical producer of distribution artifacts.** Never
+   hand-write a Cursor `.mdc`, a `CLAUDE.md`, or an `AGENTS.md` for a target stack and commit it
+   into `dist/`. The single-source-of-truth principle (`docs/02-implementation-plan.md` §1) is the
+   project's load-bearing invariant.
+
+## 3. Tech Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Compiler language | Python 3.12 | Lands in Phase 4. |
+| Frontmatter parser | `python-frontmatter` | Phase 4. |
+| Schema validation | `jsonschema` | Phase 2. |
+| Templating | `jinja2` | Phase 4–5. |
+| Tests | `pytest` + golden-file snapshots | Phase 6. |
+| CI | GitHub Actions | `.github/workflows/`. |
+| Consumer sync CLI | Node CLI (`@org/standards-sync`) | Phase 8. |
+| Release identity | `@standards-bot` GitHub App | Phase 7. |
+
+## 4. Commands
+
+Phase 1 is scaffolding only; most commands below land in later phases. Listed here so that future
+agents and engineers know what to expect.
+
+```bash
+# Phase 2 onwards — validate source frontmatter:
+python -m compiler.core.parse_source --validate-only
+
+# Phase 4 onwards — compile to a stack target:
+python -m compiler --stack java-spring-boot-3 --target cursor --out dist/
+
+# Phase 6 onwards — golden snapshot tests:
+pytest tests/
+
+# Phase 7 onwards — release (manual dispatch in GitHub UI only):
+#   GitHub Actions → release.yml → "Run workflow" (Standards Architect / PM only)
+```
+
+## 5. Code Style
+
+- **Branch names**: `feat/<area>/<short-desc>`, `fix/<area>/<short-desc>`, `docs/<short-desc>`.
+- **Commit style**: Conventional Commits. AI-assisted commits MUST include the trailer
+  `Includes-AI-Code: true`.
+- **Markdown**: every source rule follows the structure in `.cursor/rules/authoring-style.mdc`
+  (paired ❌/✅ blocks, three numbered sections, frontmatter contract).
+- **Python**: PEP-8 + `black` formatting once Phase 4 lands. Type-annotate every public function.
+- **YAML**: 2-space indent, lowercase keys, double-quote strings only when special chars are present.
+
+## 6. Testing
+
+| Layer | Test type | Lands in |
+|---|---|---|
+| Frontmatter schema | `pytest tests/test_schemas.py` against `schemas/source-rule.schema.json` | Phase 2 |
+| Compiler core | Unit tests in `tests/test_parse_source.py`, `tests/test_resolve_globs.py`, … | Phase 4 |
+| Transformers | Unit tests under `tests/test_transformers/` | Phases 4–5 |
+| End-to-end | Golden-file snapshot tests in `tests/test_compiler_golden.py` | Phase 6 |
+| ArchUnit fixtures | Hand-authored Java tests under `tests/archunit/` | Phase 6 |
+
+## 7. Boundaries — Where AI Should and Should Not Generate
+
+| Path | AI may generate? | Reviewer |
+|---|---|---|
+| `source/**/*.md` | Yes — drafts only. Standards Architect MUST review. | Standards Architect |
+| `compiler/**/*.py` | Yes — including tests. | Compiler Engineer |
+| `schemas/**` | Yes — but cite the architecture report §7.1 in the PR. | Standards Architect + Compiler Engineer |
+| `docs/**` (except `decision-records/`) | Yes. | Any reviewer |
+| `docs/decision-records/**` (ADRs) | Yes — drafts only. AI Enablement PM signs off. | AI Enablement PM |
+| `docs/02-implementation-plan.md` | Edit ONLY via the phase-execution workflow (`docs/03-execution-playbook.md`). Never freelance. | Operator |
+| `dist/**` | **NO.** Regenerated by `release.yml` under `@standards-bot` only. | n/a |
+| `.github/**` | Yes — workflows, CODEOWNERS. | Platform team |
+| `.cursor/rules/**` | Yes — the central repo's dogfood rules. | Standards Architect |
+
+## 8. Phase-Execution Discipline
+
+This repo runs on a strict one-phase-per-session workflow described in `docs/03-execution-playbook.md`.
+If you have been pasted into a new session:
+
+1. Open `docs/execution-log/next-session-prompt.md` and follow it verbatim.
+2. Do NOT execute work outside the current phase's scope (hard rule of the playbook).
+3. Produce all four deliverables (artifacts, plan update, log, next-session prompt) before
+   considering the session complete.
+
+## 9. Where to Look First
+
+| If you need to… | Go to |
+|---|---|
+| Understand what's being built and why | `docs/ai-engineering-standards-blueprint.md` → `docs/01-architecture-upgrade-report.md` |
+| See the full phase plan with acceptance criteria | `docs/02-implementation-plan.md` |
+| See what was done last session | `docs/execution-log/phase-*-log.md` (read the latest) |
+| Pick up the next session | `docs/execution-log/next-session-prompt.md` |
+| See past architectural decisions | `docs/decision-records/` (ADRs 0001–0004) |
+| See review routing | `.github/CODEOWNERS` |
+| See branch-protection settings | `docs/branch-protection-config.md` |
+| See the source-rule authoring style | `.cursor/rules/authoring-style.mdc` + `.cursor/rules/frontmatter-spec.mdc` |

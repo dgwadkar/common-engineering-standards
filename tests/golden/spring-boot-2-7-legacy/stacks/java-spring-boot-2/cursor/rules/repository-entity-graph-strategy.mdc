@@ -1,0 +1,110 @@
+---
+description: "EntityGraph Over JOIN FETCH for Pagination-Safe Eager Loading — apply to Spring Boot 2.7 (legacy)"
+globs: ["**/dao/**/*.java", "**/persistence/**/*.java", "**/repository/**/*.java"]
+alwaysApply: false
+---
+
+# EntityGraph Over JOIN FETCH for Pagination-Safe Eager Loading
+
+## 1. Context & Architectural Intent
+
+Hibernate offers two mechanisms for eager-loading associations on demand: JPQL `JOIN FETCH` and
+the `@EntityGraph` annotation. They look interchangeable in tutorial examples but compose very
+differently with `Pageable`:
+
+- `@EntityGraph` translates to a `LEFT OUTER JOIN` that Hibernate de-duplicates after fetching;
+  it composes correctly with `Pageable`.
+- `JOIN FETCH` against a `*ToMany` association FORCES Hibernate to fall back to **in-memory
+  pagination**, emitting the warning `HHH000104: firstResult/maxResults specified with
+  collection fetch; applying in memory`. Hibernate loads the entire result set, deduplicates,
+  then takes the requested page — a guaranteed OOM at scale.
+
+AI agents pattern-match `JOIN FETCH` from the JPQL tutorial corpus and use it for both
+single-row eager loads AND paginated list loads. This rule forces `@EntityGraph` as the
+default and reserves `JOIN FETCH` only for single-row queries that do not interact with
+pagination.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. List / Page Queries MUST Use `@EntityGraph`, Not `JOIN FETCH`
+
+* **Rule**: A repository method that returns `List<T>`, `Page<T>`, or `Slice<T>` AND needs an
+  association eagerly loaded MUST use `@EntityGraph(attributePaths = {…})`. It MUST NOT use
+  `JOIN FETCH` for `*ToMany` associations in such queries.
+* **Rationale**: `JOIN FETCH` + `Pageable` triggers in-memory pagination — Hibernate loads
+  every row, deduplicates the Cartesian explosion, then paginates in Java. The HHH000104
+  warning is the signal; the OOM is the consequence. `@EntityGraph` composes correctly with
+  `Pageable` and emits a paginated outer join.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — JOIN FETCH + Pageable → HHH000104, in-memory pagination
+  public interface OrderRepository extends JpaRepository<Order, Long> {
+      @Query("SELECT o FROM Order o JOIN FETCH o.lines WHERE o.status = :status")
+      Page<Order> findByStatus(@Param("status") OrderStatus status, Pageable pageable);
+  }
+
+  // ✅ CORRECT — @EntityGraph composes with Pageable
+  public interface OrderRepository extends JpaRepository<Order, Long> {
+      @EntityGraph(attributePaths = {"lines"})
+      Page<Order> findByStatus(OrderStatus status, Pageable pageable);
+  }
+  ```
+
+### 2.2. `JOIN FETCH` IS Allowed for Single-Row Queries
+
+* **Rule**: A repository method that returns `Optional<T>` (or a single `T`) MAY use
+  `JOIN FETCH` to eagerly load an association. Single-row queries do not interact with
+  `Pageable`, so the HHH000104 trap does not apply.
+* **Rationale**: For single-row loads, `JOIN FETCH` and `@EntityGraph` are equivalent.
+  `JOIN FETCH` is sometimes more readable in JPQL when multiple joins compose.
+* **Implementation Requirement**:
+
+  ```java
+  // ✅ CORRECT — single-row query, JOIN FETCH is safe
+  public interface OrderRepository extends JpaRepository<Order, Long> {
+      @Query("""
+          SELECT o
+          FROM Order o
+          LEFT JOIN FETCH o.lines
+          LEFT JOIN FETCH o.customer
+          WHERE o.id = :id
+          """)
+      Optional<Order> findByIdEager(@Param("id") Long id);
+  }
+  ```
+
+### 2.3. The `attributePaths` Array Lists Every Eagerly-Loaded Field
+
+* **Rule**: When using `@EntityGraph(attributePaths = {…})`, the array MUST list EVERY
+  field the downstream caller will access. Hidden lazy access on an un-listed field reintroduces
+  the N+1 — silently and exactly when load increases.
+* **Rationale**: The `attributePaths` is the contract between the repository and the service.
+  A field not listed is implicitly lazy. Reviewers can match the listed paths against the
+  service's traversal pattern; the unmatched access is the bug.
+
+### 2.4. Nested Paths Use Dot Notation
+
+* **Rule**: To eagerly load a nested association, use dot notation:
+  `attributePaths = {"customer", "customer.address"}`. The compiler does NOT auto-traverse.
+* **Implementation Requirement**:
+
+  ```java
+  // ✅ CORRECT — load order → customer → address in one query
+  @EntityGraph(attributePaths = {"customer", "customer.address", "lines"})
+  Page<Order> findByStatus(OrderStatus status, Pageable pageable);
+  ```
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/repository/**/*.java`,
+`**/dao/**/*.java`, or `**/persistence/**/*.java`:
+
+1. **For any list / page repository method that needs eager loading, default to `@EntityGraph`.**
+   Reject `JOIN FETCH` for `*ToMany` associations on `Pageable`-returning queries — flag the
+   HHH000104 in-memory-pagination risk.
+2. **For single-row repository methods (`Optional<T>`, single `T`), `JOIN FETCH` is acceptable**
+   if it improves readability.
+3. **When generating an `@EntityGraph`, list EVERY traversed path** the downstream caller
+   needs. Treat the array as the explicit load contract.
+4. **Use dot notation for nested paths.** Do not assume Hibernate will auto-traverse.

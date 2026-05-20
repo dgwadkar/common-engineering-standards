@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase-6 fixture consumer manifest (docs/02-implementation-plan.md §9 task 1).
+
+  Purpose: a minimal Spring Boot 3.2 project descriptor that the Phase-8
+  consumer-sync CLI will recognize as `stack=java-spring-boot-3, framework_version=3.2.x`.
+  Phase 6 uses it as the input pin for the corresponding golden fixture under
+  `tests/golden/spring-boot-3-2/`.
+
+  This file is INTENTIONALLY MINIMAL: every dependency listed here is one that
+  the rule corpus references in its `target_tools.archunit` activation paths
+  (Spring Data JPA → repository rules; Validation → controller validation rules;
+  Lombok → constructor-injection rule's optional-Lombok branch). No other
+  dependencies are present so the fixture's stack signature is unambiguous.
+
+  Provenance: Phase 6 (Fixtures, Golden Files, and CI). Do not edit by hand
+  to add/remove dependencies without also refreshing the golden tree
+  (`make update-golden`) — the consumer-sync detection logic in Phase 8 will
+  parse this file to surface a recommended-versus-current diff in the sync
+  report.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example.fixtures</groupId>
+    <artifactId>spring-boot-3-2-fixture</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>spring-boot-3-2-fixture</name>
+    <description>Phase-6 stack fixture: pins java-spring-boot-3 (Boot 3.2.x).</description>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>1.3.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

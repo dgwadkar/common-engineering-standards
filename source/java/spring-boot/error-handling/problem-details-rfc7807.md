@@ -1,0 +1,137 @@
+---
+id: java-spring-error-handling-problem-details-rfc7807
+title: RFC 7807 ProblemDetail as the Wire Format on Spring Boot 3+
+version: 1.0.0
+status: approved
+scope:
+  language: java
+  framework: spring-boot
+  framework_version: ">=3.0"
+  layers:
+    - error-handling
+target_tools:
+  cursor: true
+  github_copilot: true
+  claude_skills: true
+  junie: true
+  agents_md: true
+activation:
+  cursor_mode: auto-attach
+  agents_md_priority: medium
+dependencies:
+  - java-spring-error-handling-unified-api-error
+related_logic_holes: [1, 2]
+archunit_test: testing/archunit/ProblemDetailsRfc7807Test.java
+---
+
+# RFC 7807 ProblemDetail as the Wire Format on Spring Boot 3+
+
+## 1. Context & Architectural Intent
+
+Spring Boot 3 (Spring Framework 6) ships first-class support for RFC 7807 Problem Details for
+HTTP APIs via `org.springframework.http.ProblemDetail` and the `@ProblemDetail` machinery on
+`ResponseEntityExceptionHandler`. This is the JetBrains Junie-aligned wire format for error
+responses (see Architecture Upgrade Report §3.3, Junie guideline #7). For Spring Boot 3+ stacks,
+the unified `ApiErrorResponse` shape (see `unified-api-error.md`) MUST be expressed as a
+`ProblemDetail` extension with the org's `errorCode`, `fieldValidationErrors`, and `traceId`
+fields layered on as RFC 7807 "extension members".
+
+Spring Boot 2.7 and earlier do not ship `ProblemDetail`; those stacks keep `ApiErrorResponse` as
+the wire format unchanged. The `framework_version: ">=3.0"` filter in this rule's frontmatter
+ensures the Phase-4 compiler only ships it to the Spring Boot 3 stack.
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. Error Responses Use `ProblemDetail`, Not a Plain Record
+
+* **Rule**: Every `@ExceptionHandler` method in the central advice MUST return a
+  `ProblemDetail` (or `ResponseEntity<ProblemDetail>`), with the canonical `type`, `title`,
+  `status`, `detail`, and `instance` fields populated AND the org's extension members
+  (`errorCode`, `fieldValidationErrors`, `traceId`) added via `setProperty()`.
+* **Rationale**: RFC 7807 is the cross-org interop standard for HTTP error payloads. Many
+  org-external consumers (partner integrations, API gateways, monitoring tools) understand
+  `application/problem+json` natively; emitting it removes per-consumer adapter code.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — bypass ProblemDetail on a Spring Boot 3 stack
+  @ExceptionHandler(OrderNotFoundException.class)
+  public ResponseEntity<ApiErrorResponse> handle(OrderNotFoundException e) {
+      return ResponseEntity.status(HttpStatus.NOT_FOUND)
+          .body(new ApiErrorResponse("order-not-found", e.getMessage(), Map.of(), Instant.now(), traceId()));
+  }
+
+  // ✅ CORRECT — RFC 7807 ProblemDetail with extension members
+  @ExceptionHandler(OrderNotFoundException.class)
+  public ProblemDetail handle(OrderNotFoundException e, HttpServletRequest req) {
+      ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+      pd.setType(URI.create("https://errors.acme.com/order-not-found"));
+      pd.setTitle("Order Not Found");
+      pd.setInstance(URI.create(req.getRequestURI()));
+      pd.setProperty("errorCode", "order-not-found");
+      pd.setProperty("traceId", traceId());
+      pd.setProperty("fieldValidationErrors", Map.of());
+      return pd;
+  }
+  ```
+
+### 2.2. The `type` URI Identifies the Error Class
+
+* **Rule**: Every `ProblemDetail` MUST set `type` to a stable, dereferenceable URI under the
+  org's error-catalog namespace (e.g., `https://errors.acme.com/<error-code>`). The URI MAY
+  return HTML documentation for human readers; it MUST NOT change shape over time for a given
+  error code.
+* **Rationale**: The `type` URI is RFC 7807's stable identifier for the error class. Consumers
+  pattern-match on it (and only it) to decide handling logic — `status` alone is too coarse,
+  and `detail` is human prose.
+
+### 2.3. Validation Failures Use the `errors` Extension Member Pattern
+
+* **Rule**: The handler for `MethodArgumentNotValidException` MUST set the `fieldValidationErrors`
+  extension member to a `Map<String, String>` of field-name → message. It MUST also follow the
+  community convention of including an `errors` array of `{field, code, message}` objects for
+  consumers that prefer the array shape.
+* **Rationale**: The map shape preserves backward compatibility with `ApiErrorResponse`
+  consumers; the array shape aligns with the broader RFC 7807 community pattern (used by
+  Stripe, GitHub, and most OpenAPI-first tooling).
+
+### 2.4. Content-Type MUST Be `application/problem+json`
+
+* **Rule**: All `ProblemDetail` responses MUST carry `Content-Type: application/problem+json`.
+  Spring Boot 3's auto-configuration handles this when `spring.mvc.problemdetails.enabled=true`
+  is set in `application.yml` AND the handler returns `ProblemDetail` directly (not wrapped in
+  `ResponseEntity` with an overriding content type).
+* **Rationale**: Wrong content type defeats consumer pattern-matching ("if `Content-Type` ends
+  in `/problem+json`, parse as RFC 7807").
+* **Implementation Requirement**:
+
+  ```yaml
+  # ❌ ANTI-PATTERN — auto-configuration disabled, content type defaults to application/json
+  spring:
+    mvc:
+      problemdetails:
+        enabled: false
+
+  # ✅ CORRECT
+  spring:
+    mvc:
+      problemdetails:
+        enabled: true
+  ```
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code in `**/exception/**`, `**/advice/**`, or
+`**/errors/**` on a Spring Boot 3+ stack:
+
+1. **Default to `ProblemDetail` over a custom record.** Use `ProblemDetail.forStatusAndDetail()`
+   as the entry point; layer the org's `errorCode`, `traceId`, and `fieldValidationErrors` via
+   `setProperty()`.
+2. **Always set a stable `type` URI** under the org's error-catalog namespace. The URI's path
+   segment is the same `errorCode` string used in the extension member.
+3. **For validation handlers**, emit BOTH the `fieldValidationErrors` map (back-compat) AND the
+   `errors` array (RFC 7807 community convention).
+4. **Verify `spring.mvc.problemdetails.enabled=true`** in `application.yml` whenever the project
+   gains its first `ProblemDetail` handler. If absent, add it in the same change.
+5. **Do NOT use `ProblemDetail` on Spring Boot 2.x stacks** — the class does not exist there.
+   Fall back to the `ApiErrorResponse` record from `unified-api-error.md`.

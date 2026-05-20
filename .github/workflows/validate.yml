@@ -1,0 +1,567 @@
+name: validate
+
+# Central repo validation workflow — extended in each phase.
+#
+# Phase 1 added the `tree-shape` job (docs/02-implementation-plan.md §4):
+#   asserts the directory skeleton scaffolded in Phase 1 is present and well-formed.
+#
+# Phase 2 added the `schema-validation` job (docs/02-implementation-plan.md §5):
+#   installs the schema-validation toolchain (pyyaml + jsonschema + pytest),
+#   runs `compiler/core/parse_source.py --validate-only` against every
+#   `source/**/*.md` + `schemas/examples/*.md`, and runs the Phase-2 pytest
+#   suite at `tests/test_schemas.py`. Triggered on every push/PR to main —
+#   running unconditionally is cheap (<5 s) and avoids the `paths:`-filter
+#   foot-gun where a structural-only change accidentally bypasses validation.
+#
+# Phase 4 added the `compiler-unit-tests` job (docs/02-implementation-plan.md §7):
+#   exercises the Phase-4 compiler modules (parser dataclass path, glob resolver,
+#   dependency graph, stack filter, Cursor MDC transformer) plus an end-to-end CLI
+#   invocation. Shares the same toolchain pins as `schema-validation` so a single
+#   CI cache hit covers both jobs.
+#
+# Phase 5 (docs/02-implementation-plan.md §8) extends the same `compiler-unit-tests`
+#   job with the five new transformers (copilot_instructions, claude_md,
+#   junie_agents_md, universal_agents_md, memory_bank_scaffold) plus an AC1+AC2
+#   end-to-end smoke step that runs `--target all` and asserts the §5.2 directory
+#   tree (cursor/, copilot/, claude/, junie/, agents-md/, memory-bank/) is produced
+#   and the universal AGENTS.md is ≤150 lines.
+#
+# Phase 6 (docs/02-implementation-plan.md §9) adds the `golden-snapshots` job:
+#   re-runs the compiler against each fixture under `fixtures/<name>/` and
+#   asserts byte-identical output against `tests/golden/<name>/`. Also runs
+#   the Phase-6 ArchUnit-fixture shape suite (`tests/test_archunit_fixtures.py`).
+#   The job extends `compiler-unit-tests` rather than running in parallel —
+#   a single CI cache hit covers both. Per the Phase-2 lesson, every Phase-6
+#   addition lives inside THIS workflow file.
+#
+# Phase 7 (docs/02-implementation-plan.md §10 task 3) adds the
+# `dist-protection-lint` job: on every PR, fail if any commit modifies
+# `dist/**` and is NOT authored by the `@standards-bot` GitHub App. The
+# release workflow at `.github/workflows/release.yml` is the SOLE allowed
+# producer of `dist/` changes; this job is the PR-level enforcement that
+# pairs with branch protection's "Restrict who can push" setting on `main`
+# (per `docs/decision-records/0004-single-repo-distribution.md` §2.2 G2).
+#
+# Per the Phase-2 / Phase-6 lesson, the dist-protection-lint job lives as
+# a SIBLING job inside this file rather than in a separate workflow file —
+# one workflow, one CI cache hit, one place to maintain.
+#
+# Each phase extends THIS file rather than introducing parallel workflows.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  tree-shape:
+    name: Repository tree shape (Phase 1 baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required top-level directories exist
+        run: |
+          set -euo pipefail
+          required_dirs=(
+            source
+            compiler
+            schemas
+            fixtures
+            tests
+            dist
+            docs
+            docs/decision-records
+            docs/execution-log
+            .github
+            .github/workflows
+            .cursor
+            .cursor/rules
+            tools/git-hooks
+          )
+          missing=()
+          for d in "${required_dirs[@]}"; do
+            if [[ ! -d "$d" ]]; then
+              missing+=("$d")
+            fi
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing required directories:" >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          echo "All required top-level directories present."
+
+      - name: Verify source/ layer-keyed split (ADR-0002)
+        run: |
+          set -euo pipefail
+          required_source_dirs=(
+            source/_global
+            source/java/_core
+            source/java/spring-boot/architecture
+            source/java/spring-boot/controller
+            source/java/spring-boot/service
+            source/java/spring-boot/repository
+            source/java/spring-boot/error-handling
+            source/java/spring-boot/di
+            source/java/spring-boot/config
+            source/java/spring-boot/testing
+            source/typescript/_core
+            source/typescript/nestjs/controller
+            source/typescript/nestjs/service
+            source/python/fastapi/controller
+            source/python/fastapi/service
+          )
+          missing=()
+          for d in "${required_source_dirs[@]}"; do
+            [[ -d "$d" ]] || missing+=("$d")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing required source/ subdirectories:" >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          echo "source/ tree matches the layer-keyed split."
+
+      - name: Verify dist/ stacks scaffold (ADR-0004)
+        run: |
+          set -euo pipefail
+          required_dist_dirs=(
+            dist/stacks/java-spring-boot-3
+            dist/stacks/java-spring-boot-2
+            dist/stacks/typescript-nestjs-10
+            dist/stacks/python-fastapi-0-110
+          )
+          missing=()
+          for d in "${required_dist_dirs[@]}"; do
+            [[ -d "$d" ]] || missing+=("$d")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing required dist/ subdirectories:" >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+          if [[ ! -f dist/README.md ]]; then
+            echo "Missing dist/README.md (the auto-generated notice file)." >&2
+            exit 1
+          fi
+          if ! grep -q '0004-single-repo-distribution' dist/README.md; then
+            echo "dist/README.md must reference ADR-0004." >&2
+            exit 1
+          fi
+          echo "dist/ scaffold present and ADR-0004 notice in place."
+
+      - name: Verify governance/dogfood files
+        run: |
+          set -euo pipefail
+          required_files=(
+            README.md
+            AGENTS.md
+            .github/CODEOWNERS
+            docs/branch-protection-config.md
+            .cursor/rules/authoring-style.mdc
+            .cursor/rules/frontmatter-spec.mdc
+            tools/git-hooks/pre-commit
+            tools/git-hooks/README.md
+          )
+          missing=()
+          for f in "${required_files[@]}"; do
+            [[ -f "$f" ]] || missing+=("$f")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing required governance/dogfood files:" >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+          if [[ ! -x tools/git-hooks/pre-commit ]]; then
+            echo "tools/git-hooks/pre-commit must be executable." >&2
+            exit 1
+          fi
+
+          for adr in 0001-mdc-over-cursorrules 0002-layer-keyed-source-split 0003-deferred-mcp-server 0004-single-repo-distribution; do
+            if [[ ! -f "docs/decision-records/${adr}.md" ]]; then
+              echo "Missing ADR: docs/decision-records/${adr}.md" >&2
+              exit 1
+            fi
+          done
+
+          echo "Governance and dogfood files all present."
+
+  schema-validation:
+    name: Source-rule schema validation (Phase 2)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Phase-2 validator dependencies
+        # Phase 2 keeps the dependency surface minimal — only what the validator and tests need.
+        # Phase 4 (per `docs/02-implementation-plan.md` §7) replaces this inline `pip install`
+        # with `pip install -e compiler/` against a real `compiler/pyproject.toml`.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml==6.0.3 jsonschema==4.25.1 pytest==8.4.2
+
+      - name: Verify Phase-2 schema files exist
+        run: |
+          set -euo pipefail
+          required_schemas=(
+            schemas/source-rule.schema.json
+            schemas/layer-glob-map.json
+            schemas/target-tools.schema.json
+            schemas/examples/valid-source-rule.md
+          )
+          missing=()
+          for f in "${required_schemas[@]}"; do
+            [[ -f "$f" ]] || missing+=("$f")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Missing required Phase-2 schema files:" >&2
+            printf '  - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          echo "All Phase-2 schema files present."
+
+      - name: Validate JSON schemas parse as valid JSON Schema Draft 2020-12
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          import jsonschema
+
+          paths = [
+              "schemas/source-rule.schema.json",
+              "schemas/target-tools.schema.json",
+          ]
+          for p in paths:
+              schema = json.loads(pathlib.Path(p).read_text(encoding="utf-8"))
+              jsonschema.Draft202012Validator.check_schema(schema)
+              assert schema.get("$schema") == "https://json-schema.org/draft/2020-12/schema", \
+                  f"{p} missing $schema = draft 2020-12"
+              print(f"OK {p}")
+
+          # layer-glob-map.json is data, not a schema — verify it parses as JSON.
+          json.loads(pathlib.Path("schemas/layer-glob-map.json").read_text(encoding="utf-8"))
+          print("OK schemas/layer-glob-map.json")
+          PY
+
+      - name: Run source-frontmatter validator (compiler/core/parse_source.py --validate-only)
+        run: |
+          python compiler/core/parse_source.py --validate-only
+
+      - name: Run Phase-2 acceptance tests (tests/test_schemas.py)
+        run: |
+          python -m pytest tests/test_schemas.py -v
+
+  compiler-unit-tests:
+    name: Compiler unit + end-to-end tests (Phase 4)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install compiler dependencies
+        # Same pin set as schema-validation; Phase-4 introduces no new third-party deps.
+        # Phase 4 (per `docs/02-implementation-plan.md` §7) replaces this inline `pip install`
+        # with `pip install -e compiler/` against a real `compiler/pyproject.toml` when the
+        # compiler graduates to a published package.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml==6.0.3 jsonschema==4.25.1 pytest==8.4.2
+
+      - name: Run Phase-4 + Phase-5 + Phase-7 compiler unit tests
+        # Covers parser, glob resolver, dependency graph (incl. Phase-5 topo_sort_relaxed),
+        # stack filter, Cursor MDC transformer (Phase 4), the five Phase-5 transformers
+        # (Copilot, Claude, Junie, universal AGENTS.md, Memory Bank scaffold), the Phase-5
+        # end-to-end AC1/AC2 smoke tests, AND the Phase-7 tools + end-to-end suite. The
+        # Phase-7 modules also include git-integration tests for compute_semver_bump.py
+        # that are skipped under sandboxed environments — CI does NOT skip them because
+        # GitHub Actions runners can write to `.git/hooks/` freely.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest \
+            tests/test_parse_source.py \
+            tests/test_resolve_globs.py \
+            tests/test_build_graph.py \
+            tests/test_stack_filter.py \
+            tests/test_cursor_mdc.py \
+            tests/test_copilot_instructions.py \
+            tests/test_claude_md.py \
+            tests/test_junie_agents_md.py \
+            tests/test_universal_agents_md.py \
+            tests/test_memory_bank_scaffold.py \
+            tests/test_phase5_end_to_end.py \
+            tests/test_compute_semver_bump.py \
+            tests/test_generate_changelog.py \
+            tests/test_generate_dist_readme.py \
+            tests/test_phase7_end_to_end.py \
+            -v
+
+      - name: End-to-end smoke (cursor target) — Phase 4 AC2
+        # Mirrors the Phase-4 AC2 verbatim command. Writes outputs under a workflow-scoped
+        # tmpdir and confirms the cursor/rules tree contains at least one .mdc per
+        # applicable rule.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          out_dir="$(mktemp -d)"
+          python -m compiler --stack java-spring-boot-3 --target cursor --out "$out_dir"
+          mdc_count=$(find "$out_dir/stacks/java-spring-boot-3/cursor/rules" -maxdepth 1 -name '*.mdc' | wc -l | tr -d ' ')
+          if [[ "$mdc_count" -lt 15 ]]; then
+            echo "Expected ≥15 .mdc files for java-spring-boot-3 stack; got $mdc_count" >&2
+            exit 1
+          fi
+          echo "Cursor end-to-end smoke green: $mdc_count .mdc files written."
+
+      - name: End-to-end smoke (--target all) — Phase 5 AC1 + AC2
+        # Mirrors Phase-5 AC1 (every §5.2 target subtree present) and AC2 (universal
+        # AGENTS.md ≤150 lines).
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          out_dir="$(mktemp -d)"
+          python -m compiler --stack java-spring-boot-3 --target all --out "$out_dir"
+          stack_root="$out_dir/stacks/java-spring-boot-3"
+          for path in \
+            "$stack_root/cursor/rules" \
+            "$stack_root/copilot/copilot-instructions.md" \
+            "$stack_root/claude/CLAUDE.md" \
+            "$stack_root/junie/AGENTS.md" \
+            "$stack_root/agents-md/AGENTS.md" \
+            "$stack_root/memory-bank/techContext.md"; do
+            if [[ ! -e "$path" ]]; then
+              echo "Phase-5 AC1 failure: missing §5.2 path $path" >&2
+              exit 1
+            fi
+          done
+          line_count=$(wc -l < "$stack_root/agents-md/AGENTS.md" | tr -d ' ')
+          if [[ "$line_count" -gt 150 ]]; then
+            echo "Phase-5 AC2 failure: AGENTS.md is $line_count lines (cap 150)" >&2
+            exit 1
+          fi
+          echo "Phase-5 end-to-end smoke green: §5.2 tree present, AGENTS.md $line_count lines."
+
+      - name: End-to-end smoke (--all-stacks) — Phase 7
+        # Mirrors what release.yml will do: regenerate every stack in one CLI call.
+        # The Phase-6 golden tests pin per-stack byte equality; this step confirms the
+        # single-invocation path produces the same shape as the per-stack loop.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          out_dir="$(mktemp -d)"
+          python -m compiler --all-stacks --target all --out "$out_dir"
+          for stack in java-spring-boot-3 java-spring-boot-2 typescript-nestjs-10 python-fastapi-0-110; do
+            if [[ ! -d "$out_dir/stacks/$stack/cursor/rules" ]]; then
+              echo "Phase-7 smoke failure: missing $out_dir/stacks/$stack/cursor/rules" >&2
+              exit 1
+            fi
+          done
+          echo "Phase-7 --all-stacks smoke green: every stack subtree produced."
+
+      - name: Phase-7 release-tools dry-run smoke (no commit, no push, no tag)
+        # Confirms the three release-helper scripts can each be invoked end-to-end on
+        # the current repo state. Each is run in dry-run / preview mode so no files
+        # outside the workflow's tmpdir are touched.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # 1. compute_semver_bump — defaults are safe in any git state.
+          python tools/compute_semver_bump.py --print-rationale || true
+
+          # 2. generate_changelog (first-release flavor — covers the corpus listing path).
+          python tools/generate_changelog.py --new-version v0.0.0 --previous-tag none --dry-run > /tmp/cl.md
+          test -s /tmp/cl.md  # non-empty.
+
+          # 3. generate_dist_readme against a fresh build.
+          out_dir="$(mktemp -d)"
+          python -m compiler --all-stacks --target all --out "$out_dir" >/dev/null
+          python tools/generate_dist_readme.py --version v0.0.0 --dist-root "$out_dir" --dry-run > /tmp/readme.md
+          grep -q 0004-single-repo-distribution /tmp/readme.md
+          echo "Phase-7 release-tools smoke green."
+
+  golden-snapshots:
+    name: Golden snapshots + ArchUnit fixture shape (Phase 6)
+    runs-on: ubuntu-latest
+    # Phase-6 sibling job (docs/02-implementation-plan.md §9). Locks the
+    # compiler's output behavior with byte-for-byte snapshot tests against
+    # `tests/golden/<fixture>/` and asserts the four hand-authored ArchUnit
+    # fixtures preserve their canonical shape + violation messages. Runs in
+    # parallel with `compiler-unit-tests` to keep wall-clock low — the
+    # Phase-5 end-to-end smoke step in `compiler-unit-tests` is a strict
+    # subset of what this job verifies.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install compiler dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml==6.0.3 jsonschema==4.25.1 pytest==8.4.2
+
+      - name: Verify Phase-6 fixtures + golden trees are on disk
+        # Catch the "developer added a stack but forgot to populate the
+        # golden tree" failure mode early with a clear error.
+        run: |
+          set -euo pipefail
+          required_fixtures=(
+            fixtures/spring-boot-3-2/pom.xml
+            fixtures/spring-boot-2-7-legacy/pom.xml
+            fixtures/nestjs-10/package.json
+            fixtures/fastapi-0-110/pyproject.toml
+          )
+          for f in "${required_fixtures[@]}"; do
+            [[ -f "$f" ]] || { echo "Missing fixture manifest: $f" >&2; exit 1; }
+          done
+          required_golden_dirs=(
+            tests/golden/spring-boot-3-2
+            tests/golden/spring-boot-2-7-legacy
+            tests/golden/nestjs-10
+            tests/golden/fastapi-0-110
+          )
+          for d in "${required_golden_dirs[@]}"; do
+            [[ -d "$d" ]] || { echo "Missing golden tree: $d (run 'make update-golden')" >&2; exit 1; }
+          done
+          echo "All Phase-6 fixtures + golden trees are in place."
+
+      - name: Run golden snapshot tests (tests/test_compiler_golden.py)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/test_compiler_golden.py -v
+
+      - name: Run ArchUnit-fixture shape tests (tests/test_archunit_fixtures.py)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest tests/test_archunit_fixtures.py -v
+
+      - name: Verify the four hand-authored ArchUnit Java fixtures are on disk
+        run: |
+          set -euo pipefail
+          required=(
+            tests/archunit/ControllerValidationTest.java
+            tests/archunit/TransactionalDisciplineTest.java
+            tests/archunit/PaginationMandateTest.java
+            tests/archunit/ConstructorInjectionTest.java
+            tests/archunit/README.md
+          )
+          for f in "${required[@]}"; do
+            [[ -f "$f" ]] || { echo "Missing Phase-6 ArchUnit fixture: $f" >&2; exit 1; }
+          done
+          echo "All four ArchUnit fixtures present."
+
+      - name: Drift report (informational; never fails)
+        # If a future PR introduces a non-deterministic field in the
+        # transformers (e.g., a generation timestamp) the snapshot test
+        # above already fails — this step prints a per-fixture summary
+        # to make the failure easier to triage in the Actions log. Runs
+        # only on failure so green CI stays quiet.
+        if: failure()
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python tools/explain_golden_diff.py || true
+
+  dist-protection-lint:
+    name: Dist protection (Phase 7 — block human edits to dist/)
+    # Phase-7 PR status check (docs/02-implementation-plan.md §10 task 3).
+    # Pairs with `.github/CODEOWNERS` (G1) and branch protection (G3) to
+    # enforce that `dist/` is regenerated ONLY by release.yml. The job runs
+    # on every PR event but is a no-op when the PR diff contains no dist/
+    # paths — the common case.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR head with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the base ref (origin/main) for diff comparison
+        run: |
+          set -euo pipefail
+          base_ref="${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags --depth=0 origin "${base_ref}"
+          echo "BASE_SHA=$(git rev-parse origin/${base_ref})" >> "$GITHUB_ENV"
+
+      - name: Enforce ADR-0004 — dist/ is regenerated only by @standards-bot
+        run: |
+          set -euo pipefail
+
+          # 1. List every path in the PR diff that lives under dist/.
+          dist_paths=$(git diff --name-only "${BASE_SHA}...HEAD" -- 'dist/' || true)
+
+          if [[ -z "$dist_paths" ]]; then
+            echo "PR does not modify any dist/ paths. Pass."
+            exit 0
+          fi
+
+          echo "::warning title=dist/ paths detected in PR::The following dist/ paths"
+          echo "::warning::are modified by this PR. Verifying every commit author is @standards-bot."
+          while IFS= read -r p; do
+            echo "  - $p"
+          done <<< "$dist_paths"
+
+          # 2. Every commit in the PR range MUST be authored by the @standards-bot App.
+          #    The App identity surfaces in `git log` as:
+          #       Author name:  "standards-bot[bot]"
+          #       Author email: "<APP_ID>+standards-bot[bot]@users.noreply.github.com"
+          #    We match on the name, which is stable across rotations.
+          #
+          #    Allowed values (any one matches):
+          #       "standards-bot[bot]"  (the literal app identity)
+          #       "standards-bot"       (graceful fallback if the [bot] suffix is stripped)
+          non_bot_authors=$(git log "${BASE_SHA}..HEAD" --format='%an' \
+            | grep -vE '^standards-bot(\[bot\])?$' || true)
+
+          if [[ -n "$non_bot_authors" ]]; then
+            echo ""
+            echo "::error title=dist-protection-lint failure::Human authors cannot modify dist/."
+            echo "::error::The dist/ tree is regenerated only by .github/workflows/release.yml"
+            echo "::error::running under the @standards-bot GitHub App identity."
+            echo "::error::See docs/decision-records/0004-single-repo-distribution.md."
+            echo ""
+            echo "Commits in this PR authored by non-bot identities:"
+            git log "${BASE_SHA}..HEAD" --format='  %h  %an  %s' \
+              | grep -vE '  standards-bot(\[bot\])?  ' || true
+            echo ""
+            echo "Recovery options:"
+            echo "  (a) Drop the dist/ changes from this PR (most common — these changes"
+            echo "      are auto-regenerated by the release workflow on merge to main)."
+            echo "  (b) If you intended to ship a release, dispatch release.yml manually"
+            echo "      from the Actions tab — that workflow is the only path that may"
+            echo "      modify dist/."
+            exit 1
+          fi
+
+          echo "Every commit in this PR is authored by @standards-bot. Pass."
+          # The lint passes if the PR is the release workflow's own PR (rare —
+          # release.yml pushes direct to main, so this branch normally never fires).

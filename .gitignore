@@ -1,0 +1,27 @@
+# Python — added in Phase 2 to keep local venvs / caches out of git.
+# Phase 4 supersedes this with a `compiler/pyproject.toml`-driven layout, but
+# the ignore patterns themselves remain correct.
+__pycache__/
+*.py[cod]
+*$py.class
+.venv*/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+build/
+dist-build/
+*.egg-info/
+
+# Editors / OS noise
+.DS_Store
+.idea/
+*.swp
+
+# Phase-7 test fixture root (workspace-rooted tmp for git-touching tests because
+# the system /tmp is unwritable under some sandboxes). Tests create per-test
+# subdirectories under tests/.tmp/ and clean them up via fixture teardown; this
+# entry covers the leftover-after-crash case.
+tests/.tmp/

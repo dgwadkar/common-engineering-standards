@@ -1,0 +1,109 @@
+---
+description: Authoring style for engineering-standards source rules — paired anti-pattern/correct-pattern blocks, required section structure, when to use alwaysApply vs auto-attach.
+globs: ["source/**/*.md"]
+alwaysApply: false
+---
+
+# Authoring Style for Source Rules
+
+This rule fires whenever an author opens or edits a file under `source/**/*.md`. It is the
+"eat-our-own-dog-food" guidance the central repo uses on itself. The fuller, prose-form authoring
+guide lands in `docs/authoring-guide.md` in Phase 3; this MDC file is the always-loaded checklist.
+
+Reference: `docs/02-implementation-plan.md` §6 (Phase 3) and `docs/01-architecture-upgrade-report.md`
+§5.1 + Appendix A.
+
+## 1. Mandatory Section Structure
+
+Every source rule MUST contain these three top-level sections, in this order, after the YAML
+frontmatter:
+
+```markdown
+# <Title — same as frontmatter `title`>
+
+## 1. Context & Architectural Intent
+<Why this rule exists. The architectural problem it prevents. 2–6 paragraphs.>
+
+## 2. Enforced Standards (AI Ingestion Core)
+### 2.1. <First enforced standard>
+* **Rule**: <one sentence, imperative>
+* **Rationale**: <one paragraph>
+* **Implementation Requirement**:
+  ```<lang>
+  // ❌ ANTI-PATTERN
+  ...
+  // ✅ CORRECT
+  ...
+  ```
+
+### 2.2. <Second enforced standard>
+... (same shape)
+
+## 3. AI Directives
+<Imperative bullet list aimed at the agent. "When generating <X>, you MUST <Y>.">
+```
+
+## 2. Mandatory Paired ❌ / ✅ Convention
+
+Every enforced standard in §2 MUST contain at least one paired example with the literal markers
+`❌ ANTI-PATTERN` and `✅ CORRECT`. The paired form is what makes the rule legible to a downstream
+LLM: a single side (only "do" or only "don't") halves the signal.
+
+```markdown
+// ❌ ANTI-PATTERN
+@PostMapping("/users")
+public UserResponse create(@RequestBody UserCreateRequest req) { ... }
+
+// ✅ CORRECT
+@PostMapping("/users")
+public UserResponse create(@Valid @RequestBody UserCreateRequest req) { ... }
+```
+
+Both blocks MUST use the same language fence and be minimal — only the lines that demonstrate the
+contrast. Resist the urge to inline imports, package declarations, or unrelated boilerplate; they
+dilute the signal.
+
+## 3. When `alwaysApply: true` Is Appropriate (Rare)
+
+Default to `cursor_mode: auto-attach` with a layer-resolved glob. Choose `alwaysApply: true` (which
+maps to `cursor_mode: always` in source frontmatter) ONLY when:
+
+- The rule is **architectural** and cross-cuts every file (e.g., `source/_global/clean-architecture.md`).
+- The rule is **safety-critical** and applies regardless of file type (e.g., "never log secrets").
+- A reviewer has explicitly approved the choice in the PR description.
+
+Excessive `alwaysApply: true` rules erode the token-budget gain that motivated the
+layer-keyed split in the first place. See `docs/02-implementation-plan.md` §14 R-06.
+
+## 4. Dependency References
+
+Use `dependencies: [<source-rule-id>, ...]` in the frontmatter to declare prerequisites. The
+compiler topologically sorts dependencies so they are emitted first when concatenating into the
+single-file targets (Copilot, Claude, Junie). A cycle fails the build.
+
+Cite the architecture report and ADRs in the prose body using relative links:
+`[ADR-0002](../../../docs/decision-records/0002-layer-keyed-source-split.md)`.
+
+## 5. ArchUnit Test References
+
+If the rule can be expressed as a static-analysis check, add an `archunit_test:` pointer in the
+frontmatter even if the test file does not exist yet — Phase 6 will fill them in. The path is
+relative to the source-tree root and looks like `testing/archunit/ControllerValidationTest.java`.
+
+## 6. Quick Checklist Before Saving
+
+- [ ] Frontmatter parses as YAML and contains every required field (see `frontmatter-spec.mdc`).
+- [ ] Title in the H1 matches `title:` in the frontmatter.
+- [ ] At least one paired ❌/✅ block per enforced standard.
+- [ ] `dependencies:` lists IDs that actually exist under `source/`.
+- [ ] `archunit_test:` points to a real path OR is omitted (not pointed at vapor).
+- [ ] No `alwaysApply: true` without justification in the PR description.
+
+## 7. AI Directives
+
+- When asked to draft a new rule, START from the structure in §1; do not invent alternative shapes.
+- When asked to add a "do this" example, ALWAYS pair it with the corresponding "don't do this".
+- When asked to set `alwaysApply: true`, push back unless the rule is in `source/_global/` or has
+  `layers: [architecture]`.
+- When unsure whether a rule belongs in `_global/` or under a specific layer, prefer the specific
+  layer — the layer-keyed split (ADR-0002) exists exactly to avoid cross-cutting bloat.

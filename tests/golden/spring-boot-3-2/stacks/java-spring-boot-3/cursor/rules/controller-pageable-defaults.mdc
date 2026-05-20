@@ -1,0 +1,133 @@
+---
+description: "Mandatory Pageable Defaults on Controller List Endpoints — apply to Spring Boot 3"
+globs: ["**/controller/**/*.java", "**/rest/**/*.java", "**/web/**/*.java"]
+alwaysApply: false
+---
+
+# Mandatory Pageable Defaults on Controller List Endpoints
+
+## 1. Context & Architectural Intent
+
+The controller layer is the second of two pagination chokepoints. The repository chokepoint
+(`findall-pagination-mandate.md`, Logic Hole #5) bans unbounded list queries against the
+database; this rule binds the contract at the HTTP boundary so that the unbounded list never
+even reaches the database call site.
+
+AI-generated controllers commonly expose `GET /resources` with a `List<ResourceResponse>`
+return type — the canonical tutorial shape. In production this defeats every pagination defense
+downstream: the controller asks the service for all rows, the service asks the repository for
+all rows, and the repository — even if it accepts `Pageable` — is invoked without one. This rule
+mandates `Pageable` on every list endpoint plus an explicit `@PageableDefault` so undocumented
+requests cannot fall back to Spring's hidden defaults.
+
+This rule is the controller-side complement to `findall-pagination-mandate.md` (Logic Hole #5)
+and overlaps with `dto-record-mandate.md` on the response-shape side (Logic Hole #3).
+
+## 2. Enforced Standards (AI Ingestion Core)
+
+### 2.1. Every List Endpoint MUST Return `Page<Record>` or `Slice<Record>`
+
+* **Rule**: A controller method whose response is a collection MUST return `Page<TheRecord>` or
+  `Slice<TheRecord>`. It MUST NOT return `List<TheRecord>`, `Iterable<TheRecord>`,
+  `Set<TheRecord>`, or `Stream<TheRecord>`.
+* **Rationale**: `Page` and `Slice` carry the metadata clients need to navigate (total count,
+  hasNext) and pin the contract to the paginated mental model. `List<T>` invites callers to
+  cache, sort client-side, or count via `.size()` — all of which break at scale.
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN
+  @GetMapping("/orders")
+  public List<OrderResponse> list() {
+      return orderRepository.findAll().stream().map(OrderResponse::from).toList();
+  }
+
+  // ✅ CORRECT
+  @GetMapping("/orders")
+  public Page<OrderResponse> list(
+      @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
+      Pageable pageable
+  ) {
+      return orderRepository.findAll(pageable).map(OrderResponse::from);
+  }
+  ```
+
+### 2.2. Every `Pageable` Parameter MUST Carry `@PageableDefault`
+
+* **Rule**: Every controller method that accepts a `Pageable` parameter MUST annotate it with
+  `@PageableDefault`, specifying at minimum `size` and `sort`. The `direction` defaults to
+  `ASC` and SHOULD be set explicitly when descending order is intended (e.g., recency-sorted
+  listings).
+* **Rationale**: Without `@PageableDefault`, an undocumented request falls back to Spring's
+  built-in default (`size=20`, no sort), which is invisible to API consumers and unsafe to
+  rely on for sort stability.
+
+### 2.3. Page Size Hard Cap Enforced in `application.yml`
+
+* **Rule**: The application MUST configure `spring.data.web.pageable.max-page-size: 100` (or
+  stricter) in `application.yml`. The Phase-2 schema's `framework_version: ">=2.7"` covers
+  the property's availability across all supported Spring Boot versions.
+* **Rationale**: Without a cap, the pagination contract is theatrical — a client can defeat it
+  by passing `?size=1000000`. The cap belongs at the framework layer so no per-controller
+  validation is needed.
+* **Implementation Requirement**:
+
+  ```yaml
+  # ✅ CORRECT
+  spring:
+    data:
+      web:
+        pageable:
+          default-page-size: 20
+          max-page-size: 100
+          one-indexed-parameters: false
+  ```
+
+### 2.4. The Sort Field MUST Be Whitelisted Against the Underlying Entity
+
+* **Rule**: When a controller exposes a `Pageable` parameter, the upstream service or
+  controller MUST validate the requested sort fields against an allow-list of safe properties.
+  Direct pass-through of arbitrary sort fields to `Sort.by(...)` MUST be rejected.
+* **Rationale**: Spring's `Pageable` blindly translates the `?sort=` query parameter into an
+  ORDER BY. If the entity exposes an indexable column the API has no business sorting by (e.g.,
+  `passwordHash`, `internalAuditMetadata`), the attacker can probe internal columns or trigger
+  expensive full-table sorts (a `Sort.by("nonIndexedTextColumn DESC")` on a 100M-row table).
+* **Implementation Requirement**:
+
+  ```java
+  // ❌ ANTI-PATTERN — pass-through sort
+  @GetMapping("/orders")
+  public Page<OrderResponse> list(@PageableDefault Pageable pageable) {
+      return orderRepository.findAll(pageable).map(OrderResponse::from);
+  }
+
+  // ✅ CORRECT — sort whitelist
+  private static final Set<String> ALLOWED_SORT = Set.of("createdAt", "totalCents", "status");
+
+  @GetMapping("/orders")
+  public Page<OrderResponse> list(
+      @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC)
+      Pageable pageable
+  ) {
+      pageable.getSort().forEach(order -> {
+          if (!ALLOWED_SORT.contains(order.getProperty())) {
+              throw new InvalidSortFieldException(order.getProperty());
+          }
+      });
+      return orderService.list(pageable).map(OrderResponse::from);
+  }
+  ```
+
+## 3. AI Directives
+
+When generating, modifying, or refactoring Java code under `**/controller/**/*.java`,
+`**/web/**/*.java`, or `**/rest/**/*.java`:
+
+1. **When asked to expose a "list X" endpoint, generate it with `Pageable` + `@PageableDefault`
+   and `Page<XResponse>` return type.** Push back on requests for `List<XResponse>` returns.
+2. **Always set both `size` and `sort` in `@PageableDefault`.** Use the natural ordering of the
+   resource (typically `createdAt DESC` for time-series data, `id ASC` for stable iteration).
+3. **When generating the controller, also propose the `spring.data.web.pageable.max-page-size`
+   entry** for `application.yml` if not already present in the project.
+4. **When the controller exposes sort, generate the sort whitelist** in the same change. Do not
+   leave pass-through `Pageable` as the surface area.

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase-6 fixture consumer manifest (docs/02-implementation-plan.md §9 task 1).
+
+  Purpose: a minimal Spring Boot 2.7 LEGACY project descriptor used to verify
+  the stack-filter version-gate. The compiler MUST exclude rules whose
+  `framework_version` semver range demands Boot 3.x (e.g.,
+  `controller/dto-record-mandate.md` declares `framework_version: ">=3.0"`)
+  from this stack's golden output. The corresponding golden tree under
+  `tests/golden/spring-boot-2-7-legacy/` therefore has FEWER files than the
+  3.2 fixture's tree — that delta is the visual proof the version gate works.
+
+  Provenance: Phase 6 (Fixtures, Golden Files, and CI). Stack id binding:
+  `java-spring-boot-2` (Boot 2.7.18 per `compiler/core/stack_filter.py::STACKS`).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example.fixtures</groupId>
+    <artifactId>spring-boot-2-7-legacy-fixture</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>spring-boot-2-7-legacy-fixture</name>
+    <description>Phase-6 stack fixture: pins java-spring-boot-2 (Boot 2.7.x legacy).</description>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.7.18</version>
+        <relativePath/>
+    </parent>
+
+    <properties>
+        <java.version>11</java.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

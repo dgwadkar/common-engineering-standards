@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://engineering-standards.example.com/schemas/source-rule.schema.json",
+  "title": "Source Rule Frontmatter",
+  "description": "Authoritative schema for the YAML frontmatter of every `source/**/*.md` file in the engineering-standards-central repository. Implements the contract specified in `docs/01-architecture-upgrade-report.md` §7.1. Authored in JSON Schema Draft 2020-12. Every field carries an inline `description` so the document is the single source of truth for human authors AND the machine validator; the `docs/authoring-guide.md` deliverable in Phase 3 is consumed FROM this file.",
+  "$comment": "Phase 2 deliverable per `docs/02-implementation-plan.md` §5 task 1. Keep this schema in lock-step with `.cursor/rules/frontmatter-spec.mdc` — the MDC is the human-facing checklist, this file is the machine-readable contract. Drift between the two is a Phase-2 acceptance-criterion regression.",
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "version", "status", "scope", "target_tools", "activation"],
+
+  "properties": {
+
+    "id": {
+      "type": "string",
+      "description": "Unique, kebab-case identifier for the rule. Lowercase ASCII letters, digits, and hyphens only. Must start and end with an alphanumeric. By convention, framework-scoped rules are prefixed `<lang>-<framework>-<layer>-` (e.g., `java-spring-controller-validation-boundaries`); `_global/` rules use a `global-` prefix. Globally unique across `source/`. This `id` is the stable handle used by `dependencies:` arrays elsewhere and by the compiler when emitting per-target output filenames.",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "minLength": 3,
+      "maxLength": 120
+    },
+
+    "title": {
+      "type": "string",
+      "description": "Human-readable rule title in sentence case, with no trailing period. MUST match the H1 heading in the Markdown body verbatim (the authoring-style MDC checks this convention; the Phase 4 compiler is allowed to assume it).",
+      "minLength": 3,
+      "maxLength": 200
+    },
+
+    "version": {
+      "type": "string",
+      "description": "Strict semver of this rule (MAJOR.MINOR.PATCH; no pre-release/build suffixes for source rules). Bump rules: editorial fixes → patch; new enforced standard added → minor; breaking change to an existing standard (narrowing scope, raising severity) → major. This is NOT the framework version — see `scope.framework_version` for that.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+
+    "status": {
+      "type": "string",
+      "description": "Lifecycle status. `draft` rules MAY land under `source/` but the Phase 4 compiler will NOT ship them to consumers. `approved` rules ship. `deprecated` rules ship with a deprecation banner and are removed in the next major release of the distribution corpus.",
+      "enum": ["draft", "approved", "deprecated"]
+    },
+
+    "scope": {
+      "type": "object",
+      "description": "Where this rule applies — the language/framework axis and the architectural-layer axis. The compiler joins these against `schemas/layer-glob-map.json` to derive the concrete `globs` array emitted into Cursor MDC frontmatter.",
+      "additionalProperties": false,
+      "required": ["language", "framework", "layers"],
+      "properties": {
+
+        "language": {
+          "type": "string",
+          "description": "Programming language identifier (lowercase, kebab-case). MUST be a key present in `schemas/layer-glob-map.json` for the Phase-4 compiler to resolve `scope.layers[]` into a concrete `globs` array; the compiler fails the build if a language is referenced but unmapped. Allowed values evolve with the corpus; the Phase 2 baseline is `java | typescript | python`. Rules under `source/_global/` use the pseudo-language `global` (NOT `_global` — leading underscores violate this field's `pattern`); the `global` pseudo-language is intentionally absent from `schemas/layer-glob-map.json` because cross-cutting global rules always pair with `activation.cursor_mode: always` (and therefore `scope.layers: [architecture]`) and never need glob resolution. See `docs/02-implementation-plan.md` §5's ⚠️ Revision (Phase 3 session, 2026-05-18) for the historical context of this convention.",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+
+        "framework": {
+          "description": "Framework identifier (lowercase, kebab-case). Use the literal YAML `null` (NOT the string `\"null\"`) for language-core rules under `<lang>/_core/` or for `_global/` rules. Examples: `spring-boot`, `nestjs`, `fastapi`. The compiler resolves stack identifiers (e.g., `java-spring-boot-3`) by joining `language` + `framework` + the stack's pinned version.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "minLength": 1, "maxLength": 32 }
+          ]
+        },
+
+        "framework_version": {
+          "type": "string",
+          "description": "Optional semver range expression that constrains which stacks receive this rule. Supports npm-/PEP-440-style operators: `>=3.0`, `^2.7.0`, `~3.1`, `>=2.0 <4.0`, plain `3.0.0`. The compiler's `stack_filter` (Phase 4) compares this against the consumer's pinned framework version. Omit this field to apply the rule to every version of the framework. Invalid expressions fail validation.",
+          "pattern": "^\\s*([~^]|>=?|<=?|=)?\\s*\\d+(\\.\\d+){0,2}(\\s+([~^]|>=?|<=?|=)?\\s*\\d+(\\.\\d+){0,2})*\\s*$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+
+        "layers": {
+          "type": "array",
+          "description": "Architectural layers this rule applies to. The compiler joins each entry against `schemas/layer-glob-map.json[<language>][<layer>]` to derive the MDC `globs` array. `architecture` is special — it signals 'cross-cuts every file', and the compiler routes it to `alwaysApply: true` with no globs. Use the narrowest layer that fits; multiple layers are allowed (e.g., `[repository, controller]` for pagination rules that fire on both ends).",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "controller",
+              "service",
+              "repository",
+              "config",
+              "test",
+              "di",
+              "error-handling",
+              "architecture",
+              "all"
+            ]
+          }
+        }
+      }
+    },
+
+    "target_tools": {
+      "type": "object",
+      "description": "Which downstream AI tools receive this rule when the compiler runs. Each per-tool transformer in `compiler/transformers/` (Phase 4 / Phase 5) skips rules whose corresponding boolean is `false`. AT LEAST ONE entry MUST be `true` — a rule with no targets is dead code and the compiler refuses to ship it (this is also enforced by the `anyOf` clause below).",
+      "additionalProperties": false,
+      "required": ["cursor", "github_copilot", "claude_skills", "junie", "agents_md"],
+      "properties": {
+        "cursor":         { "type": "boolean", "description": "Emit a Cursor `.mdc` file under `dist/stacks/<stack>/cursor/rules/`. The primary distribution target per ADR-0001." },
+        "github_copilot": { "type": "boolean", "description": "Include this rule's body in the concatenated `dist/stacks/<stack>/copilot/copilot-instructions.md`." },
+        "claude_skills":  { "type": "boolean", "description": "Include this rule's body in `dist/stacks/<stack>/claude/CLAUDE.md` (Claude Code's project context file)." },
+        "junie":          { "type": "boolean", "description": "Include this rule's body in `dist/stacks/<stack>/junie/AGENTS.md` (JetBrains Junie's expected location)." },
+        "agents_md":      { "type": "boolean", "description": "Make this rule a candidate for the universal `dist/stacks/<stack>/agents-md/AGENTS.md`. Whether it actually appears depends on `activation.agents_md_priority` (`high` → included; `medium`/`low` → omitted; total length is capped at 150 lines per the AGENTS.md spec)." }
+      },
+      "anyOf": [
+        { "properties": { "cursor":         { "const": true } }, "required": ["cursor"] },
+        { "properties": { "github_copilot": { "const": true } }, "required": ["github_copilot"] },
+        { "properties": { "claude_skills":  { "const": true } }, "required": ["claude_skills"] },
+        { "properties": { "junie":          { "const": true } }, "required": ["junie"] },
+        { "properties": { "agents_md":      { "const": true } }, "required": ["agents_md"] }
+      ]
+    },
+
+    "activation": {
+      "type": "object",
+      "description": "Controls how this rule activates inside the AI tools that receive it. `cursor_mode` maps to one of Cursor's four MDC activation modes (per ADR-0001); `agents_md_priority` gates inclusion in the ≤150-line universal AGENTS.md.",
+      "additionalProperties": false,
+      "required": ["cursor_mode", "agents_md_priority"],
+      "properties": {
+        "cursor_mode": {
+          "type": "string",
+          "description": "Maps to Cursor MDC activation modes. `always` → `alwaysApply: true`, no globs (reserve for foundational/architectural rules — see `docs/02-implementation-plan.md` §14 R-06). `auto-attach` (default) → `alwaysApply: false`, `globs:` resolved from `scope.layers`. `agent-requested` → no globs, rich `description` so Cursor's agent decides based on task intent. `manual` → empty frontmatter, fired only when a human types `@<rule-id>` in chat. Authors set this field; the source frontmatter NEVER contains `alwaysApply:` directly.",
+          "enum": ["always", "auto-attach", "agent-requested", "manual"]
+        },
+        "agents_md_priority": {
+          "type": "string",
+          "description": "Gates inclusion in the universal AGENTS.md transformer's output. `high` → included; `medium`/`low` → omitted from the universal AGENTS.md (but may still ship to Cursor/Copilot/Claude/Junie per `target_tools`). The 150-line cap on AGENTS.md is enforced at compile time; if too many rules are `high`, the compiler errors and authors must demote some to `medium`.",
+          "enum": ["high", "medium", "low"]
+        }
+      }
+    },
+
+    "dependencies": {
+      "type": "array",
+      "description": "Optional list of `id` strings (kebab-case) for other source rules this rule depends on. The compiler computes the dependency DAG (Phase 4), detects cycles (build failure), and topologically sorts so dependencies are emitted before dependents when concatenating into single-file targets (Copilot, Claude, Junie). Each entry must reference an existing rule under `source/`; the compiler raises a clear error if not.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+        "minLength": 3,
+        "maxLength": 120
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+
+    "related_logic_holes": {
+      "type": "array",
+      "description": "Optional list of integer Logic Hole catalog references. The canonical catalog lives in `docs/01-architecture-upgrade-report.md` §2. Logic Holes #1 and #2 are the baseline error-handling holes; #3, #4, #5, #6 are the four new ones introduced in the architecture upgrade. Used for cross-referencing in human-facing release notes; not consumed by any transformer.",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 999
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+
+    "archunit_test": {
+      "description": "Optional repository-relative path to the ArchUnit test that enforces this rule at build time (Phase 6 deliverable). If specified, MUST be a syntactically valid path ending in `.java`. The file may not exist yet — Phase 6 fills these in. Use `null` (literal YAML, not the string) when no build-time enforcement is possible or planned.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./-]+\\.java$",
+          "minLength": 5,
+          "maxLength": 256
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# Phase-6 fixture consumer manifest (docs/02-implementation-plan.md §9 task 1).
+#
+# Purpose: a minimal FastAPI 0.110 project descriptor used to pin the
+# python-fastapi-0-110 stack. The Phase-8 consumer-sync CLI will parse the
+# `[project]` table to detect the stack id and version. Phase 6 uses it as
+# the input pin for the corresponding golden fixture under
+# `tests/golden/fastapi-0-110/`.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastapi-0-110-fixture"
+version = "0.0.1"
+description = "Phase-6 stack fixture: pins python-fastapi-0-110 (FastAPI 0.110.x)."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0,<0.111.0",
+    "pydantic>=2.5.0,<3.0.0",
+    "uvicorn[standard]>=0.27.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
