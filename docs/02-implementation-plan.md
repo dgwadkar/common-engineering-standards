@@ -129,8 +129,8 @@ These principles are the lens through which every implementation decision is mad
 4. Each stub directory contains a `.gitkeep` file.
 5. Create `.github/CODEOWNERS` with two rules:
    - `* @platform-team @standards-council` (default ownership for source, compiler, schemas).
-   - `/dist/ @standards-bot` (the `@standards-bot` is a non-human GitHub account; PRs touching `/dist/` are auto-routed to it and never approved by humans).
-6. Configure **branch protection on `main`** (recorded as a checklist in `docs/branch-protection-config.md` since GitHub branch-protection cannot be expressed in repo files): require PR before merge, require status checks (`validate`, `dist-protection-lint`), restrict who can push (only the `@standards-bot` GitHub App can push release commits), require linear history, dismiss stale approvals on new commits.
+   - `/dist/ @engineering-standards-bot` (the `@engineering-standards-bot` is a non-human GitHub account; PRs touching `/dist/` are auto-routed to it and never approved by humans).
+6. Configure **branch protection on `main`** (recorded as a checklist in `docs/branch-protection-config.md` since GitHub branch-protection cannot be expressed in repo files): require PR before merge, require status checks (`validate`, `dist-protection-lint`), restrict who can push (only the `@engineering-standards-bot` GitHub App can push release commits), require linear history, dismiss stale approvals on new commits.
 7. Create the central repo's own `.cursor/rules/authoring-style.mdc` and `.cursor/rules/frontmatter-spec.mdc` (eat our own dog food — these guide future AI-assisted authoring of source rules).
 8. Create the repo's own `AGENTS.md` describing the meta-purpose: "this repo authors AI engineering standards; PRs to `source/` require Standards-Architect approval; PRs touching `/dist/` are produced only by the release workflow; the compiler in `compiler/` is the only mechanical producer of distribution artifacts."
 9. Create skeleton `README.md` with: project mission, link to ADRs (especially ADR-0004), link to the Architecture Upgrade Report, link to this Implementation Plan, and a short "How to consume" pointer to the sync tool.
@@ -140,7 +140,7 @@ These principles are the lens through which every implementation decision is mad
 
 - [x] `tree` output of the repo matches the target diagram in Architecture Upgrade Report §5.1, with the addition of the `dist/` subtree under the same root (per ADR-0004). — Directory skeleton verified by `.github/workflows/validate.yml` tree-shape checks, executed locally with green output. Content-leaf files listed in §5.1 (`source/_global/clean-architecture.md`, etc.) are explicitly Phase-3 deliverables and are correctly absent at Phase-1 stub stage.
 - [x] `.cursor/rules/authoring-style.mdc` exists and is loaded by Cursor when authors edit `source/**/*.md` (verified with a manual Cursor session). — File exists with frontmatter `globs: ["source/**/*.md"]`. The manual Cursor-session smoke test is a one-off operator action at PR-close time; the file structure is correct.
-- [!] `.github/CODEOWNERS` is in place; a test PR that modifies `dist/README.md` from a human author auto-requests review from `@standards-bot` and is blocked by the (yet-to-be-built) `dist-protection-lint` status check. — CODEOWNERS file is in place with the correct `/dist/ @standards-bot` routing. The live PR experiment is blocked on Phase 7: the `@standards-bot` GitHub App and the `dist-protection-lint` workflow do not yet exist. Tracked as carry-forward to Phase 7 in `docs/execution-log/phase-1-log.md`.
+- [!] `.github/CODEOWNERS` is in place; a test PR that modifies `dist/README.md` from a human author auto-requests review from `@engineering-standards-bot` and is blocked by the (yet-to-be-built) `dist-protection-lint` status check. — CODEOWNERS file is in place with the correct `/dist/ @engineering-standards-bot` routing. The live PR experiment is blocked on Phase 7: the `@engineering-standards-bot` GitHub App and the `dist-protection-lint` workflow do not yet exist. Tracked as carry-forward to Phase 7 in `docs/execution-log/phase-1-log.md`.
 - [x] Branch protection settings on `main` are documented in `docs/branch-protection-config.md` and applied in the GitHub UI (a screenshot is attached to the Phase-1 closing PR). — Document is complete (six sections including a verification procedure and a change-management procedure). Applying the settings in the GitHub UI + the screenshot is the operator's PR-close action, recorded as a carry-forward in the log.
 - [x] CI runs (an empty workflow that just checks tree shape) pass. — `.github/workflows/validate.yml` exists; parses as valid YAML; every `run:` block was bash-syntax-checked and then executed locally against the live tree with green output (see Phase-1 log §8 V-1 through V-7). The actual GitHub Actions run executes when the operator pushes the closing Phase-1 PR.
 
@@ -468,21 +468,36 @@ These principles are the lens through which every implementation decision is mad
 > operator-handoff note. See `docs/execution-log/phase-7-log.md` for the full
 > session record.
 
+> ⚠️ Revision (post-Phase-7 reconciliation, 2026-05-20): At App-registration
+> time the operator chose the slug `engineering-standards-bot` rather than the
+> placeholder `standards-bot` used throughout the Phase-7 plan and docs (the
+> bare `standards-bot` was already taken on GitHub). All references in live
+> code, tests, and docs (`.github/workflows/*.yml`, `.github/CODEOWNERS`,
+> `tools/generate_dist_readme.py`, `tools/git-hooks/*`, `docs/release-bot-setup.md`,
+> `docs/release-rollback.md`, `docs/branch-protection-config.md`,
+> `docs/decision-records/0004-single-repo-distribution.md`, `AGENTS.md`,
+> `tests/test_phase7_end_to_end.py`, and the §10 ACs below) have been
+> reconciled to the live slug. The two repo secrets
+> (`STANDARDS_BOT_APP_ID`, `STANDARDS_BOT_PRIVATE_KEY`) keep their original
+> names — they were already provisioned and renaming them would invalidate
+> the live release workflow. Phase-7 execution logs under
+> `docs/execution-log/` are deliberately left unchanged (historical record).
+
 **Goal**: Establish the automated release flow that regenerates the `dist/` folder, commits it under a CI-only identity, and tags semver releases — all within the single `engineering-standards-central` repository per ADR-0004.
 
-**Duration**: 2 days. **Output**: One GitHub Actions release workflow + a CODEOWNERS-enforced `dist/` protection lint check + a registered GitHub App (`@standards-bot`).
+**Duration**: 2 days. **Output**: One GitHub Actions release workflow + a CODEOWNERS-enforced `dist/` protection lint check + a registered GitHub App (`@engineering-standards-bot`).
 
 ### Tasks
 
-1. **Register the `@standards-bot` GitHub App**
+1. **Register the `@engineering-standards-bot` GitHub App**
    - Scope: `contents: write`, `pull-requests: write` on **only** `engineering-standards-central`.
    - Install in the org; record the App ID and private key in repo secrets (`STANDARDS_BOT_APP_ID`, `STANDARDS_BOT_PRIVATE_KEY`).
-   - All commits authored by this App appear under the `@standards-bot` identity, making release commits trivially auditable in `git log` and in GitHub's commit signature view.
+   - All commits authored by this App appear under the `@engineering-standards-bot` identity, making release commits trivially auditable in `git log` and in GitHub's commit signature view.
 2. **Implement `release.yml`** (manual `workflow_dispatch`, triggered by the Standards Architect or AI Enablement PM):
    - Step 1: Check out `main` at the chosen tip commit.
    - Step 2: Compute the semver bump using **Conventional Commits** parsing of every commit since the previous tag. `feat:` ⇒ minor, `fix:` ⇒ patch, `BREAKING CHANGE:` ⇒ major.
    - Step 3: Run `python -m compiler --all-stacks --out dist/`. The compiler regenerates the entire `dist/` tree deterministically; previous output is overwritten.
-   - Step 4: Authenticate as `@standards-bot` via the App credentials.
+   - Step 4: Authenticate as `@engineering-standards-bot` via the App credentials.
    - Step 5: Commit the regenerated `dist/` tree with message `chore(release): regenerate dist for v<X.Y.Z>` (no other paths touched).
    - Step 6: Tag the new commit `v<X.Y.Z>` (annotated tag, signed if the org policy requires).
    - Step 7: Generate `CHANGELOG.md` for `dist/CHANGELOG.md` from rule-id additions, removals, and frontmatter changes since the previous tag.
@@ -491,12 +506,12 @@ These principles are the lens through which every implementation decision is mad
    - Triggered on every PR open / synchronize / reopen.
    - Logic: `git diff --name-only origin/main...HEAD` must satisfy ONE of:
      - (a) The PR contains zero paths under `dist/`, OR
-     - (b) Every commit's author is the `@standards-bot` GitHub App (i.e., produced by `release.yml`).
+     - (b) Every commit's author is the `@engineering-standards-bot` GitHub App (i.e., produced by `release.yml`).
    - Failure mode: fails with the message *"Human authors cannot modify `/dist/`. The `dist/` tree is regenerated by `release.yml` only. See ADR-0004."*
 4. **Configure branch protection on `main`** (already documented in Phase 1, applied in the GitHub UI now):
    - Require pull request before merge.
    - Require the `validate`, `golden-tests`, and `dist-protection-lint` status checks to pass.
-   - Restrict pushes to `main` to the `@standards-bot` App **only** for the release workflow's commit; humans always go through PR.
+   - Restrict pushes to `main` to the `@engineering-standards-bot` App **only** for the release workflow's commit; humans always go through PR.
    - Require linear history; force pushes disabled.
 5. **Auto-update `dist/README.md`** during the release workflow with a generated index of `stacks/<stack>/`, a one-line description of each, and the current semver and changelog link. This file is committed inside the same release commit.
 6. **Document the rollback procedure** in `docs/release-rollback.md`: a bad release is reverted by (a) running `release.yml` against the prior good commit (re-pinning), or (b) opening a manual revert PR that the Standards Council fast-tracks. Either path produces a new tag (`v2.4.1`) — never a moved tag, never a force-push.
@@ -504,10 +519,10 @@ These principles are the lens through which every implementation decision is mad
 ### Acceptance Criteria
 
 - [!] Merging an example PR that adds a new source rule does NOT modify `/dist/`. The dist tree is regenerated only on manual release. — **Mechanical guards in place**: there is no auto-regenerate-on-PR trigger anywhere (`release.yml` is `workflow_dispatch:` only), and `dist-protection-lint` blocks any PR whose diff includes `dist/**` from a non-bot author. **Live PR experiment** (open a PR adding one source rule and confirm `dist/` is untouched on green merge) is the operator's PR-close action — the agent cannot push to GitHub.
-- [!] Manually dispatching `release.yml` produces a single commit authored by `@standards-bot`, a `v<X.Y.Z>` tag, a populated `dist/CHANGELOG.md`, and a GitHub Release. — **All mechanical artifacts complete** (15-step `release.yml` with App-token auth, semver-bump tool, changelog generator, README generator). **Live dispatch** requires three prerequisite operator actions documented in `docs/release-bot-setup.md`: (a) register the `@standards-bot` GitHub App, (b) store `STANDARDS_BOT_APP_ID` + `STANDARDS_BOT_PRIVATE_KEY` repo secrets, (c) update branch protection to allow the App to push to `main` per `docs/branch-protection-config.md` §2.4. The dry-run mode (`workflow_dispatch` input `dry-run: true`) is available to preview the release locally before the first real dispatch.
+- [!] Manually dispatching `release.yml` produces a single commit authored by `@engineering-standards-bot`, a `v<X.Y.Z>` tag, a populated `dist/CHANGELOG.md`, and a GitHub Release. — **All mechanical artifacts complete** (15-step `release.yml` with App-token auth, semver-bump tool, changelog generator, README generator). **Live dispatch** requires three prerequisite operator actions documented in `docs/release-bot-setup.md`: (a) register the `@engineering-standards-bot` GitHub App, (b) store `STANDARDS_BOT_APP_ID` + `STANDARDS_BOT_PRIVATE_KEY` repo secrets, (c) update branch protection to allow the App to push to `main` per `docs/branch-protection-config.md` §2.4. The dry-run mode (`workflow_dispatch` input `dry-run: true`) is available to preview the release locally before the first real dispatch.
 - [!] A test PR by a human that touches a file under `dist/` is blocked by the `dist-protection-lint` status check with a clear error message. — **Mechanical guard verified** by `tests/test_phase7_end_to_end.py::test_dist_protection_lint_failure_message_cites_adr_0004` (asserts the literal "Human authors cannot modify dist/" + ADR-0004 reference in the workflow YAML). **Live test PR** is the operator's PR-close action.
-- [!] Branch protection on `main` is verified via screenshot in the closing PR for Phase 7. — `docs/branch-protection-config.md` updated with (a) the `golden-tests`→`golden-snapshots` naming reconciliation, (b) the `dist-protection-lint` required-status-check entry, (c) the §2.4 push-restriction update adding `@standards-bot`. **GitHub-UI apply + screenshot** is the operator's PR-close action.
-- [!] `git log --author=standards-bot dist/` returns the complete history of dist regenerations and nothing else. — Until the operator runs the first `release.yml` dispatch, `git log --author=standards-bot` is correctly empty. The audit-query template + the quarterly audit procedure are documented in `docs/release-bot-setup.md` §6. This AC ticks `[x]` after the first release lands.
+- [!] Branch protection on `main` is verified via screenshot in the closing PR for Phase 7. — `docs/branch-protection-config.md` updated with (a) the `golden-tests`→`golden-snapshots` naming reconciliation, (b) the `dist-protection-lint` required-status-check entry, (c) the §2.4 push-restriction update adding `@engineering-standards-bot`. **GitHub-UI apply + screenshot** is the operator's PR-close action.
+- [!] `git log --author=engineering-standards-bot dist/` returns the complete history of dist regenerations and nothing else. — Until the operator runs the first `release.yml` dispatch, `git log --author=engineering-standards-bot` is correctly empty. The audit-query template + the quarterly audit procedure are documented in `docs/release-bot-setup.md` §6. This AC ticks `[x]` after the first release lands.
 
 ### Why This Replaces a Second Repo
 
@@ -517,7 +532,7 @@ The originally-proposed second repo provided four functional guarantees:
 |---|---|
 | Humans cannot write to compiled output | `dist-protection-lint` status check + CODEOWNERS routing + branch protection |
 | Compiled output has clean semver tags | `release.yml` tags `v<X.Y.Z>` on `main`; consumers resolve `dist/stacks/<stack>/` at that tag |
-| Releases are auditable | Every release commit's author is `@standards-bot`; `git log --author=standards-bot` is the audit log |
+| Releases are auditable | Every release commit's author is `@engineering-standards-bot`; `git log --author=engineering-standards-bot` is the audit log |
 | Rollback is mechanical | Re-run `release.yml` against the prior good commit, producing a new tag with the prior content |
 
 Graduation to a separate repo (per ADR-0004) is a `git filter-repo` away if any of the four trigger conditions ever fire.
@@ -630,9 +645,9 @@ Graduation to a separate repo (per ADR-0004) is a `git filter-repo` away if any 
 | R-08 | Multi-repo sync drift — some repos pin v1.x, others v2.x — produces inconsistent AI behavior | Medium | Medium | Telemetry dashboard tracks version distribution; the council triggers a "minimum version" mandate quarterly. |
 | R-09 | Lombok-vs-no-Lombok divergence on Logic Hole #6 (constructor injection) | Low | Low | The rule's body conditionally references Lombok based on the consumer's manifest detection; both branches documented. |
 | R-10 | Author authority concentrated in the Standards Architect (bus factor) | Medium | High | At least two reviewers required on every `source/` PR; pair-author every new rule for the first quarter. |
-| R-11 | Single-repo blast radius — a compromised CI token could in theory mutate `source/` as well as `dist/` | Low | High | The `@standards-bot` GitHub App scope is `contents: write` on a single repo only; humans cannot push to `main` directly (branch protection); release commits are restricted by branch-protection's "restrict who can push" setting to the App identity; rotate App private key annually; audit `git log --author=standards-bot` quarterly. Graduate to two-repo (ADR-0004 trigger) if the threat model changes. |
+| R-11 | Single-repo blast radius — a compromised CI token could in theory mutate `source/` as well as `dist/` | Low | High | The `@engineering-standards-bot` GitHub App scope is `contents: write` on a single repo only; humans cannot push to `main` directly (branch protection); release commits are restricted by branch-protection's "restrict who can push" setting to the App identity; rotate App private key annually; audit `git log --author=engineering-standards-bot` quarterly. Graduate to two-repo (ADR-0004 trigger) if the threat model changes. |
 | R-12 | `dist/` history bloats repo size over time | Low | Low | Markdown text grows slowly (~50 KB per release × 24 releases/yr ≈ 1.2 MB/yr). Monitor repo size quarterly; if it crosses 500 MB, run `git filter-repo` to graduate `dist/` into a separate repo per ADR-0004. Consumer sync uses sparse archive download, not full clone, so repo size does not affect end-user latency until graduation. |
-| R-13 | Author accidentally edits `dist/` and merges before lint check fires | Very Low | Medium | Three layered guards: (a) `dist-protection-lint` is a *required* status check on `main`; (b) CODEOWNERS auto-requests review from `@standards-bot` which never approves; (c) opt-in client pre-commit hook blocks the staged change locally. All three would have to fail simultaneously. |
+| R-13 | Author accidentally edits `dist/` and merges before lint check fires | Very Low | Medium | Three layered guards: (a) `dist-protection-lint` is a *required* status check on `main`; (b) CODEOWNERS auto-requests review from `@engineering-standards-bot` which never approves; (c) opt-in client pre-commit hook blocks the staged change locally. All three would have to fail simultaneously. |
 
 ---
 
@@ -645,7 +660,7 @@ The overall **MVP** (delivered by end of Phase 8) is considered complete when:
 - [ ] A consumer repo can run `npx @org/standards-sync` and receive working `.cursor/rules/*.mdc`, `.github/copilot-instructions.md`, `CLAUDE.md`, `.junie/AGENTS.md`, and root `AGENTS.md`.
 - [ ] The four new Logic Holes (#3, #4, #5, #6) are encoded in source AND emitted into Cursor MDC AND ship as ArchUnit tests.
 - [ ] CI rejects malformed source files within 30 seconds of PR creation.
-- [ ] `engineering-standards-central` has branch protection on `main`, the `dist-protection-lint` status check is required, the `@standards-bot` GitHub App is registered, and at least one semver release tag exists with a populated `dist/CHANGELOG.md`.
+- [ ] `engineering-standards-central` has branch protection on `main`, the `dist-protection-lint` status check is required, the `@engineering-standards-bot` GitHub App is registered, and at least one semver release tag exists with a populated `dist/CHANGELOG.md`.
 
 The overall **GA** (delivered by end of Phase 10) requires the MVP plus:
 

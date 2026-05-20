@@ -4,7 +4,7 @@ name: release
 #
 # This workflow is the SOLE producer of commits and tags that touch `dist/`. It runs only on
 # manual dispatch by an operator (Standards Architect or AI Enablement PM) and authenticates
-# as the `@standards-bot` GitHub App, scoped to this repository only.
+# as the `@engineering-standards-bot` GitHub App, scoped to this repository only.
 #
 # Procedure (matches plan §10 task 2 step-by-step):
 #
@@ -13,11 +13,11 @@ name: release
 #      an operator-supplied `--force-bump` override.
 #   3. Run `python -m compiler --all-stacks --target all --out dist/` — the Phase-7 CLI flag
 #      added in this phase regenerates the entire `dist/stacks/` tree deterministically.
-#   4. Mint a short-lived installation token for `@standards-bot` via the official
+#   4. Mint a short-lived installation token for `@engineering-standards-bot` via the official
 #      `actions/create-github-app-token@v1` action.
 #   5. Commit the regenerated `dist/` tree with the canonical
 #      `chore(release): regenerate dist for v<X.Y.Z>` message. Configures git as the
-#      App identity so `git log --author=standards-bot` is the audit log.
+#      App identity so `git log --author=engineering-standards-bot` is the audit log.
 #   6. Tag the new commit `v<X.Y.Z>` (annotated). Signed if org policy mandates it.
 #   7. Generate `dist/CHANGELOG.md` from rule-id additions/removals/frontmatter changes
 #      since the previous tag, and `dist/README.md` from the live `dist/` tree. Both files
@@ -28,10 +28,10 @@ name: release
 #
 # Required repo secrets (operator-provisioned per `docs/release-bot-setup.md`):
 #
-#   STANDARDS_BOT_APP_ID         — The numeric App ID for the @standards-bot GitHub App.
+#   STANDARDS_BOT_APP_ID         — The numeric App ID for the @engineering-standards-bot GitHub App.
 #   STANDARDS_BOT_PRIVATE_KEY    — The full contents of the App's downloaded .pem file.
 #
-# Branch protection on `main` MUST allow `@standards-bot` to push directly (per
+# Branch protection on `main` MUST allow `@engineering-standards-bot` to push directly (per
 # `docs/branch-protection-config.md` §2.4); this is the only allowed direct push to `main`.
 # Until the operator applies that branch-protection setting in the GitHub UI, this workflow
 # will fail at the push step with `refusing to update protected branch`.
@@ -142,16 +142,16 @@ jobs:
         run: |
           python tools/generate_dist_readme.py --version "${{ steps.bump.outputs.next_version }}"
 
-      - name: Mint an installation token for @standards-bot
+      - name: Mint an installation token for @engineering-standards-bot
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.STANDARDS_BOT_APP_ID }}
           private-key: ${{ secrets.STANDARDS_BOT_PRIVATE_KEY }}
 
-      - name: Configure git as standards-bot
+      - name: Configure git as engineering-standards-bot
         run: |
-          git config user.name "standards-bot[bot]"
+          git config user.name "engineering-standards-bot[bot]"
           git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
       - name: Verify only dist/ paths changed (defense-in-depth)

@@ -1,8 +1,8 @@
-# `@standards-bot` GitHub App — Registration & Operational Setup
+# `@engineering-standards-bot` GitHub App — Registration & Operational Setup
 
 > **Purpose**: GitHub Apps cannot be registered from inside a repository. This document is the
 > canonical, step-by-step checklist that the repository administrator (Standards Architect OR
-> AI Enablement PM) follows in the GitHub UI to provision the `@standards-bot` GitHub App that
+> AI Enablement PM) follows in the GitHub UI to provision the `@engineering-standards-bot` GitHub App that
 > is the sole authorized writer of `dist/` per
 > `docs/decision-records/0004-single-repo-distribution.md` §2.3.
 >
@@ -26,7 +26,7 @@ repository**, with `contents: write` and nothing else.
 
 GitHub Apps give us:
 
-1. **Identity isolation** — `@standards-bot` is a non-human author. `git log --author=standards-bot dist/`
+1. **Identity isolation** — `@engineering-standards-bot` is a non-human author. `git log --author=engineering-standards-bot dist/`
    becomes the audit log of every release (AC5 of plan §10).
 2. **Permission scoping** — the App is installed on **only** `engineering-standards-central`,
    not on the entire org. A leaked App key compromises one repo, not the whole org (R-11
@@ -51,7 +51,7 @@ admin rights on the repository, you cannot register the App — escalate to the 
 
 | Field | Value |
 |---|---|
-| GitHub App name | `standards-bot` |
+| GitHub App name | `engineering-standards-bot` |
 | Description | Release identity for `engineering-standards-central`. Regenerates `dist/` on manual `release.yml` dispatch. See `docs/decision-records/0004-single-repo-distribution.md`. |
 | Homepage URL | `https://github.com/<org>/engineering-standards-central` |
 | Webhook → Active | **Unchecked** (no webhook events needed; the App is only invoked by `release.yml`). |
@@ -85,7 +85,7 @@ secrets) are correct because `release.yml` runs in this repo only.
 4. Click **Install**.
 
 After installation, the App appears under
-**repo → Settings → GitHub Apps → standards-bot** with the granted permissions visible.
+**repo → Settings → GitHub Apps → engineering-standards-bot** with the granted permissions visible.
 
 ### 2.4 Verify the installation
 
@@ -96,7 +96,7 @@ required):
 # Replace <APP_ID> with the value from §2.2.
 gh api /repos/<org>/engineering-standards-central/installation \
   --jq '.app_slug + " installed (id=" + (.id|tostring) + ")"'
-# Expected: "standards-bot installed (id=<some-number>)"
+# Expected: "engineering-standards-bot installed (id=<some-number>)"
 ```
 
 If the output is `404`, the App is not installed on the repo — repeat §2.3.
@@ -113,7 +113,7 @@ store the two secrets from §2.2**. After that, the workflow runs without furthe
 The workflow authenticates with the official `actions/create-github-app-token@v1` action:
 
 ```yaml
-- name: Mint an installation token for @standards-bot
+- name: Mint an installation token for @engineering-standards-bot
   id: app-token
   uses: actions/create-github-app-token@v1
   with:
@@ -128,13 +128,13 @@ single release run.
 The commit author is set to the App's bot identity via:
 
 ```yaml
-- name: Configure git as @standards-bot
+- name: Configure git as @engineering-standards-bot
   run: |
-    git config user.name "standards-bot[bot]"
-    git config user.email "<APP_ID>+standards-bot[bot]@users.noreply.github.com"
+    git config user.name "engineering-standards-bot[bot]"
+    git config user.email "<APP_ID>+engineering-standards-bot[bot]@users.noreply.github.com"
 ```
 
-The `<APP_ID>+standards-bot[bot]@users.noreply.github.com` pattern is GitHub's canonical
+The `<APP_ID>+engineering-standards-bot[bot]@users.noreply.github.com` pattern is GitHub's canonical
 no-reply email for a GitHub App identity. Substitute the App ID from §2.2; the workflow YAML
 reads it from `${{ steps.app-token.outputs.app-slug }}` so this is computed dynamically and
 does **not** need a code edit on App registration.
@@ -149,7 +149,7 @@ This is documented in `docs/branch-protection-config.md` §2.4 — the operator 
 
 1. Navigate to **repo → Settings → Branches → Branch protection rules → `main` → Edit**.
 2. Scroll to **Restrict who can push to matching branches**.
-3. Add **standards-bot** under the actor list.
+3. Add **engineering-standards-bot** under the actor list.
 4. Save.
 5. Update the screenshot in the Phase-7 closing PR.
 
@@ -187,12 +187,12 @@ within scope:
 ```bash
 # 1. Confirm every commit on `main` whose diff touches `dist/` was authored by the App.
 git log --pretty='%H %an' main -- dist/ \
-  | awk '$2 != "standards-bot[bot]" { print "VIOLATION:", $0; found=1 } END { exit found }'
+  | awk '$2 != "engineering-standards-bot[bot]" { print "VIOLATION:", $0; found=1 } END { exit found }'
 # Exit 0 → audit passes. Exit 1 → at least one human-authored `dist/` commit slipped through;
 # investigate immediately (G2/G3 misfire).
 
 # 2. Confirm the App has no commits OUTSIDE `dist/`.
-git log --author='standards-bot' --pretty='%H' main \
+git log --author='engineering-standards-bot' --pretty='%H' main \
   | while read sha; do
       paths_outside=$(git show --name-only --pretty='' "$sha" | grep -v '^dist/' | grep -v '^$' || true)
       if [[ -n "$paths_outside" ]]; then
@@ -233,12 +233,12 @@ When closing the Phase 7 PR, paste the checklist below and tick each box as the 
 action completes:
 
 ```markdown
-- [ ] `standards-bot` App registered per `docs/release-bot-setup.md` §2.1
+- [ ] `engineering-standards-bot` App registered per `docs/release-bot-setup.md` §2.1
 - [ ] `STANDARDS_BOT_APP_ID` repo secret stored per §2.2
 - [ ] `STANDARDS_BOT_PRIVATE_KEY` repo secret stored per §2.2
 - [ ] App installed on `engineering-standards-central` per §2.3
 - [ ] `gh api .../installation` returns 200 per §2.4
-- [ ] Branch-protection "Restrict who can push" updated to include `standards-bot` per §4
+- [ ] Branch-protection "Restrict who can push" updated to include `engineering-standards-bot` per §4
 - [ ] Screenshot of branch-protection settings attached to this PR per §4
 - [ ] Annual key-rotation reminder set on Standards Architect's calendar per §5
 - [ ] Quarterly audit reminder set on Standards Architect's calendar per §6

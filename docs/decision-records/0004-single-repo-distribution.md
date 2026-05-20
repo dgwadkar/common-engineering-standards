@@ -60,7 +60,7 @@ engineering-standards-central/
 │       ├── typescript-nestjs-10/...
 │       └── python-fastapi-0-110/...
 ├── .github/
-│   ├── CODEOWNERS         # /dist/ owned by @standards-bot
+│   ├── CODEOWNERS         # /dist/ owned by @engineering-standards-bot
 │   └── workflows/
 │       ├── validate.yml
 │       ├── dist-protection-lint.yml
@@ -72,16 +72,16 @@ engineering-standards-central/
 
 | Guard | Mechanism | Owner | Phase that ships it |
 |---|---|---|---|
-| **G1 — CODEOWNERS routing** | `.github/CODEOWNERS` routes `/dist/` to `@standards-bot` (a non-human GitHub App account). Humans editing `/dist/` see review auto-requested from a bot that never approves. | Phase 1 | `docs/02-implementation-plan.md` §4 Task 5 |
-| **G2 — Required status check** | `.github/workflows/dist-protection-lint.yml` is a blocking PR check. It fails any PR whose diff includes `/dist/**` unless every commit's author is the `@standards-bot` GitHub App. | Phase 7 | `docs/02-implementation-plan.md` §10 Task 3 |
-| **G3 — Branch protection on `main`** | `main` requires PR before merge, requires the `validate`, `golden-tests`, and `dist-protection-lint` checks, restricts pushes to the `@standards-bot` App (release commits only), and requires linear history with force-push disabled. | Phase 1 (documented), Phase 7 (enforced in GitHub UI) | `docs/02-implementation-plan.md` §4 Task 6 + §10 Task 4 |
+| **G1 — CODEOWNERS routing** | `.github/CODEOWNERS` routes `/dist/` to `@engineering-standards-bot` (a non-human GitHub App account). Humans editing `/dist/` see review auto-requested from a bot that never approves. | Phase 1 | `docs/02-implementation-plan.md` §4 Task 5 |
+| **G2 — Required status check** | `.github/workflows/dist-protection-lint.yml` is a blocking PR check. It fails any PR whose diff includes `/dist/**` unless every commit's author is the `@engineering-standards-bot` GitHub App. | Phase 7 | `docs/02-implementation-plan.md` §10 Task 3 |
+| **G3 — Branch protection on `main`** | `main` requires PR before merge, requires the `validate`, `golden-tests`, and `dist-protection-lint` checks, restricts pushes to the `@engineering-standards-bot` App (release commits only), and requires linear history with force-push disabled. | Phase 1 (documented), Phase 7 (enforced in GitHub UI) | `docs/02-implementation-plan.md` §4 Task 6 + §10 Task 4 |
 | **G4 — Client-side pre-commit hook** | `tools/git-hooks/pre-commit` fails any commit whose staged changes include both `source/**` and `dist/**` paths when the author is a human. Opt-in via `git config core.hooksPath tools/git-hooks/`. Defense-in-depth only. | Phase 1 | `docs/02-implementation-plan.md` §4 Task 10 |
 
 R-13 in `docs/02-implementation-plan.md` §14 captures the residual risk: all three required guards (G1+G2+G3) would have to fail simultaneously for a human-authored `/dist/` change to land. G4 is a fourth, opt-in, local safety net.
 
 ### 2.3 Release identity
 
-A dedicated **GitHub App named `@standards-bot`** is registered with `contents: write` and `pull-requests: write` scoped to **only** `engineering-standards-central`. Its App ID and private key live in repo secrets (`STANDARDS_BOT_APP_ID`, `STANDARDS_BOT_PRIVATE_KEY`). Every commit produced by the `release.yml` workflow is authored as `@standards-bot`. This makes `git log --author=standards-bot` the audit log of every release, and the branch-protection "restrict who can push" setting is keyed to this single non-human identity (R-11 mitigation).
+A dedicated **GitHub App named `@engineering-standards-bot`** is registered with `contents: write` and `pull-requests: write` scoped to **only** `engineering-standards-central`. Its App ID and private key live in repo secrets (`STANDARDS_BOT_APP_ID`, `STANDARDS_BOT_PRIVATE_KEY`). Every commit produced by the `release.yml` workflow is authored as `@engineering-standards-bot`. This makes `git log --author=engineering-standards-bot` the audit log of every release, and the branch-protection "restrict who can push" setting is keyed to this single non-human identity (R-11 mitigation).
 
 ### 2.4 Graduation triggers (documented escape hatch)
 
@@ -122,7 +122,7 @@ The graduation migration cost is bounded: `git filter-repo --path dist/` produce
 - **`dist/` history accumulates in the source repo.** Markdown text is small (~50 KB per release × ~24 releases/year ≈ 1.2 MB/year), but it is monotonic. Mitigated by: (a) R-12 monitoring at quarterly cadence, (b) the GT-2 graduation trigger fires deterministically before consumer-side performance degrades.
 - **Branch protection on `main` must be strict from day one.** A misconfigured "Allow force pushes" setting could destroy release history. Mitigated by: (a) documenting the exact branch-protection settings in `docs/branch-protection-config.md` (Phase 1), (b) screenshot-verified application in the closing PR of Phase 1 and Phase 7.
 - **The `dist-protection-lint` check must be defensive.** A bug in its diff analysis could let a human-authored `/dist/` change slip past CI. Mitigated by: (a) pytest unit tests for the check itself (Phase 7), (b) G1 (CODEOWNERS) catches the change at review-request time even if G2 misfires, (c) G4 (pre-commit hook) catches it locally for opted-in authors.
-- **The `@standards-bot` GitHub App is a high-value secret.** Its private key compromises release identity. Mitigated by: (a) scope limited to a single repo with `contents: write` only, (b) annual key rotation per R-11 mitigation, (c) quarterly audit of `git log --author=standards-bot`.
+- **The `@engineering-standards-bot` GitHub App is a high-value secret.** Its private key compromises release identity. Mitigated by: (a) scope limited to a single repo with `contents: write` only, (b) annual key rotation per R-11 mitigation, (c) quarterly audit of `git log --author=engineering-standards-bot`.
 - **Loss of read-access asymmetry.** With two repos, you could grant outside contractors read on `engineering-standards-distribution` while keeping source private. The single-repo model makes that asymmetry unreachable without graduating. Acceptable for the current org scope (all consumers are internal); GT-4 fires the day this assumption breaks.
 - **Loss of "publish to public" asymmetry.** If the standards corpus ever becomes a public artifact (open-sourcing the catalog), the source repo's full history goes with it unless we graduate first. GT-1 fires here.
 - **Some external observers may expect a `org/engineering-standards-distribution` repo by convention.** Mitigated by: (a) `dist/README.md` explicitly documenting the single-repo decision and pointing back to this ADR, (b) the consumer sync tool's docs explaining the layout.
@@ -167,7 +167,7 @@ Revisit if/when GT-1 fires (public artifact).
 - `docs/02-implementation-plan.md` Architecture Note (Revision 2) — the plan-level summary of this decision.
 - `docs/02-implementation-plan.md` §3 — Phase 0 task list specifying this ADR's content in detail.
 - `docs/02-implementation-plan.md` §4 — Phase 1 tasks: CODEOWNERS, branch-protection config doc, pre-commit hook.
-- `docs/02-implementation-plan.md` §10 — Phase 7 tasks: `@standards-bot` registration, `release.yml`, `dist-protection-lint.yml`.
+- `docs/02-implementation-plan.md` §10 — Phase 7 tasks: `@engineering-standards-bot` registration, `release.yml`, `dist-protection-lint.yml`.
 - `docs/02-implementation-plan.md` §10 "Why This Replaces a Second Repo" — the guarantee-by-guarantee comparison table.
 - `docs/02-implementation-plan.md` §14 — risk register entries R-11 (single-repo blast radius), R-12 (`dist/` history bloat), R-13 (accidental `dist/` edit).
 - `docs/01-architecture-upgrade-report.md` §5.2 — the original two-repo proposal this ADR revises.

@@ -48,7 +48,7 @@ The release workflow (Phase 7, `release.yml`) sets the environment variable
 sees that variable, it exits 0 unconditionally. This is safe because:
 
 - The variable is set only inside the GitHub Actions runner.
-- The release workflow runs as the `@standards-bot` GitHub App, whose commits
+- The release workflow runs as the `@engineering-standards-bot` GitHub App, whose commits
   are routed through CODEOWNERS to a non-human reviewer that never approves
   human PRs.
 

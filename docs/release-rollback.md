@@ -139,7 +139,7 @@ should know NOT to attempt it regardless. A tag is an immutable promise.
 git push --force origin main
 ```
 
-The release workflow under the `@standards-bot` App identity does **not** have force-push
+The release workflow under the `@engineering-standards-bot` App identity does **not** have force-push
 permission (per `docs/branch-protection-config.md` §2.5). Branch protection rejects the
 attempt at the API layer. This is by design.
 
@@ -147,7 +147,7 @@ attempt at the API layer. This is by design.
 
 A human commit to `dist/` is blocked by:
 
-1. CODEOWNERS routing the PR to `@standards-bot` for review (G1).
+1. CODEOWNERS routing the PR to `@engineering-standards-bot` for review (G1).
 2. The `dist-protection-lint` PR status check failing the PR (G2).
 3. Branch protection rejecting the direct push to `main` (G3).
 4. The opt-in pre-commit hook at `tools/git-hooks/pre-commit` blocking the local commit (G4).
@@ -221,4 +221,4 @@ snapshots failed to catch. File a bug.
 - `docs/decision-records/0004-single-repo-distribution.md` §4 — the "no moved tags" invariant.
 - `docs/branch-protection-config.md` §2.5 — force-push disabled.
 - `.github/workflows/release.yml` — the workflow that re-dispatches produce rollbacks.
-- `docs/release-bot-setup.md` — `@standards-bot` provisioning prerequisites.
+- `docs/release-bot-setup.md` — `@engineering-standards-bot` provisioning prerequisites.

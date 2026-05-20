@@ -6,7 +6,7 @@ Covers:
 2. ``--all-stacks`` and ``--stack`` are mutually exclusive; passing both fails parsing.
 3. ``--all-stacks`` produces byte-identical output to four separate per-stack runs.
 4. ``.github/workflows/release.yml`` parses, declares ``workflow_dispatch``, has every
-   plan §10 task-2 step, and authenticates as ``@standards-bot``.
+   plan §10 task-2 step, and authenticates as ``@engineering-standards-bot``.
 5. ``.github/workflows/validate.yml`` now has the ``dist-protection-lint`` job with the
    required PR-only conditional + the ADR-0004 reference in the failure message.
 6. ``docs/release-bot-setup.md``, ``docs/release-rollback.md``, and
@@ -147,8 +147,8 @@ def test_release_yml_has_required_step_names(release_yml):
         "Regenerate dist/ via",
         "Regenerate dist/CHANGELOG.md",
         "Regenerate dist/README.md",
-        "Mint an installation token for @standards-bot",
-        "Configure git as standards-bot",
+        "Mint an installation token for @engineering-standards-bot",
+        "Configure git as engineering-standards-bot",
         "Commit, tag, and push",
         "Create GitHub Release",
     ]
@@ -203,12 +203,12 @@ def test_dist_protection_lint_failure_message_cites_adr_0004(validate_yml):
 
 
 def test_dist_protection_lint_allows_both_bracketed_and_bare_bot_name(validate_yml):
-    """Permits both `standards-bot[bot]` (the App identity) and `standards-bot` (the bare
+    """Permits both `engineering-standards-bot[bot]` (the App identity) and `engineering-standards-bot` (the bare
     fallback). A future regex tightening that drops the fallback would block legitimate
     releases."""
     yaml_text = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
     # Look for the bash regex pattern that accepts both forms.
-    assert "standards-bot(\\[bot\\])?" in yaml_text
+    assert "engineering-standards-bot(\\[bot\\])?" in yaml_text
 
 
 def test_validate_yml_total_job_count_is_five(validate_yml):

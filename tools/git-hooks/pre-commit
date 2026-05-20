@@ -14,7 +14,7 @@
 #
 # This hook is one of three layered guards (see plan §14 R-13):
 #   1. (Server-side) `dist-protection-lint.yml` — a required PR status check.
-#   2. (Server-side) `.github/CODEOWNERS` routes /dist/ to @standards-bot.
+#   2. (Server-side) `.github/CODEOWNERS` routes /dist/ to @engineering-standards-bot.
 #   3. (Client-side, THIS hook) local pre-commit reject of mixed commits.
 #
 # All three would have to fail simultaneously for a human-authored mutation
@@ -42,7 +42,7 @@
 # (`git diff --cached --name-only`), so it does not interfere with unrelated
 # working-tree state.
 #
-# The `@standards-bot` GitHub App is identified by the presence of the
+# The `@engineering-standards-bot` GitHub App is identified by the presence of the
 # environment variable `STANDARDS_BOT_RELEASE_COMMIT=1` (the release workflow
 # sets this before invoking `git commit`). When set, the mixed-paths check is
 # skipped — the bot is *allowed* to mix paths when generating a release
@@ -76,7 +76,7 @@ if [[ "${TOUCHES_SOURCE}" -eq 1 && "${TOUCHES_DIST}" -eq 1 ]]; then
 ✗ Pre-commit blocked: this commit modifies BOTH source/ and dist/.
 
   The dist/ tree is regenerated only by .github/workflows/release.yml under
-  the @standards-bot GitHub App identity. Human commits MUST NOT mix source
+  the @engineering-standards-bot GitHub App identity. Human commits MUST NOT mix source
   edits with dist edits — this hook is the local enforcement of the rule
   described in docs/decision-records/0004-single-repo-distribution.md.
 
