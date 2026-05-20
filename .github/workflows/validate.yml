@@ -509,7 +509,12 @@ jobs:
         run: |
           set -euo pipefail
           base_ref="${{ github.event.pull_request.base.ref }}"
-          git fetch --no-tags --depth=0 origin "${base_ref}"
+          # NOTE: do NOT pass `--depth=0` here — git fetch rejects 0 as "not a
+          # positive number". Full history is already pulled by the checkout
+          # step above (`fetch-depth: 0`, which actions/checkout interprets as
+          # unbounded), so a plain `git fetch` just updates origin/<base_ref>
+          # to its tip without re-deepening anything.
+          git fetch --no-tags origin "${base_ref}"
           echo "BASE_SHA=$(git rev-parse origin/${base_ref})" >> "$GITHUB_ENV"
 
       - name: Enforce ADR-0004 — dist/ is regenerated only by @engineering-standards-bot

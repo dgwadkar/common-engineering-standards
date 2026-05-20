@@ -216,6 +216,28 @@ def test_validate_yml_total_job_count_is_five(validate_yml):
     assert len(validate_yml["jobs"]) == 5
 
 
+def test_dist_protection_lint_does_not_pass_invalid_depth_zero_to_git_fetch():
+    """Regression guard for the post-Phase-7 hotfix: `git fetch --depth=0` is
+    rejected by git ("fatal: depth 0 is not a positive number") and failed the
+    very first PR (PR #1) the lint ran on. The correct way to ensure full
+    history is to omit `--depth` (it was already fetched via
+    `actions/checkout` `fetch-depth: 0`). This test prevents the regression
+    from ever sneaking back in."""
+    import re
+
+    yaml_text = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
+    # Match `git fetch` invocations that include `--depth=0` on the same
+    # logical line (ignoring the explanatory comments that document WHY this
+    # is forbidden).
+    offending = re.findall(r"^[^#\n]*\bgit\s+fetch\b[^#\n]*--depth=0[^\n]*$", yaml_text, re.MULTILINE)
+    assert not offending, (
+        "validate.yml has a `git fetch ... --depth=0 ...` invocation; git "
+        "rejects depth 0 as 'not a positive number'. Use `actions/checkout` "
+        "with `fetch-depth: 0` to get full history, then a plain `git fetch` "
+        f"(no --depth) to update refs. Offending lines: {offending!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Doc presence + cross-references
 # ---------------------------------------------------------------------------
